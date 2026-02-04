@@ -18,7 +18,7 @@ const authenticateToken = async (req, res, next) => {
         
         // Fetch user from database
         const users = await query(
-            'SELECT id, name, email, role, subscription_type FROM users WHERE id = ? AND is_active = TRUE',
+            'SELECT id, name, email, role, subscription_type, token_version FROM users WHERE id = ? AND is_active = TRUE',
             [decoded.userId]
         );
 
@@ -29,7 +29,18 @@ const authenticateToken = async (req, res, next) => {
             });
         }
 
-        req.user = users[0];
+        const user = users[0];
+
+        // Check Token Version (for Single Session)
+        // If decoded version exists and doesn't match DB, token is invalid (logged out or logged in elsewhere)
+        if (decoded.version && user.token_version && decoded.version !== user.token_version) {
+             return res.status(401).json({ 
+                success: false, 
+                message: 'Session expired or logged in from another device' 
+            });
+        }
+
+        req.user = user;
         next();
     } catch (error) {
         if (error.name === 'TokenExpiredError') {
@@ -55,11 +66,14 @@ const optionalAuth = async (req, res, next) => {
             try {
                 const decoded = jwt.verify(token, process.env.JWT_SECRET);
                 const users = await query(
-                    'SELECT id, name, email, role, subscription_type FROM users WHERE id = ?',
+                    'SELECT id, name, email, role, subscription_type, token_version FROM users WHERE id = ?',
                     [decoded.userId]
                 );
                 if (users.length > 0) {
-                    req.user = users[0];
+                    const user = users[0];
+                    if (!decoded.version || !user.token_version || decoded.version === user.token_version) {
+                        req.user = user;
+                    }
                 }
             } catch (err) {
                 // Token invalid or expired, just proceed as guest

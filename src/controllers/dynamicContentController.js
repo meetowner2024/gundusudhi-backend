@@ -547,12 +547,12 @@ const saveKeyHighlight = async (req, res) => {
 const getFullHomepageData = async (req, res) => {
     try {
         // Flash News
+        // Flash News (Now fetching from actual Breaking News articles)
         const flashNews = await query(
-            `SELECT wi.* FROM widget_items wi
-             INNER JOIN content_widgets cw ON wi.widget_id = cw.id
-             WHERE cw.widget_type = 'flash_news' AND wi.is_active = TRUE
-             AND (wi.expire_at IS NULL OR wi.expire_at > NOW())
-             ORDER BY wi.display_order ASC LIMIT 10`
+            `SELECT id, title, summary as content, CONCAT('/news/', slug) as link, created_at, 'article' as type
+             FROM news_articles
+             WHERE is_breaking = TRUE AND status = 'PUBLISHED'
+             ORDER BY published_at DESC LIMIT 10`
         );
 
         // Breaking News
@@ -610,18 +610,21 @@ const getFullHomepageData = async (req, res) => {
              ORDER BY na.published_at DESC LIMIT 4`
         );
 
-        // Regional Updates (Real Data - State News Today)
+        // Regional Updates (Prioritize 'regional' tag -> Then Section 1)
         let regionalUpdates = await query(
-            `SELECT id, title, slug, published_at as created_at, featured_image as image_url, summary as content
-             FROM news_articles 
-             WHERE section_id = 1 
-             AND status = 'PUBLISHED'
-             AND DATE(published_at) = CURDATE()
-             ORDER BY published_at DESC LIMIT 5`
+             `SELECT na.id, na.title, na.slug, na.published_at as created_at, na.featured_image as image_url, na.summary as content
+              FROM news_articles na
+              WHERE na.status = 'PUBLISHED'
+              AND EXISTS (
+                  SELECT 1 FROM news_article_tags nat 
+                  JOIN news_tags t ON nat.tag_id = t.id 
+                  WHERE nat.news_article_id = na.id AND t.name = 'regional'
+              )
+              ORDER BY na.published_at DESC LIMIT 5`
         );
 
-        // Fallback to latest State News if no news today (Better UX)
         if (regionalUpdates.length === 0) {
+             // Fallback: Fetch general news from Section 1 if no 'regional' tags found
              regionalUpdates = await query(
                 `SELECT id, title, slug, published_at as created_at, featured_image as image_url, summary as content
                  FROM news_articles 

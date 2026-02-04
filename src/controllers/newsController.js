@@ -1,6 +1,5 @@
 const { query, transaction } = require('../config/database');
 
-// Create news article
 const createArticle = async (req, res) => {
     try {
         const {
@@ -15,6 +14,7 @@ const createArticle = async (req, res) => {
             is_breaking,
             is_featured,
             is_trending,
+            is_hero,
             status,
             tags,
             placements,
@@ -49,8 +49,8 @@ const createArticle = async (req, res) => {
             const [articleResult] = await connection.execute(
                 `INSERT INTO news_articles 
                  (title, slug, summary, content, section_id, subsection_id, author_id, 
-                  featured_image, is_premium, is_breaking, is_featured, is_trending, district_id, status, published_at) 
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                  featured_image, is_premium, is_breaking, is_featured, is_trending, is_hero, district_id, status, published_at) 
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                 [
                     title,
                     slug,
@@ -64,6 +64,7 @@ const createArticle = async (req, res) => {
                     is_breaking || false,
                     is_featured || false,
                     is_trending || false,
+                    is_hero || false,
                     resolvedDistrictId,
                     status || 'DRAFT',
                     status === 'PUBLISHED' ? new Date() : null
@@ -154,9 +155,14 @@ const getArticles = async (req, res) => {
             is_premium,
             is_breaking,
             is_featured,
+            is_trending,
+            is_hero,
+            district_id,
             page = 1,
             limit = 20,
-            search
+            search,
+            sortBy = 'createdAt',
+            order = 'desc'
         } = req.query;
 
         const offset = (page - 1) * limit;
@@ -197,12 +203,37 @@ const getArticles = async (req, res) => {
             conditions.push('a.is_featured = ?');
             values.push(is_featured === 'true');
         }
+        if (is_trending !== undefined) {
+            conditions.push('a.is_trending = ?');
+            values.push(is_trending === 'true');
+        }
+        if (is_hero !== undefined) {
+            conditions.push('a.is_hero = ?');
+            values.push(is_hero === 'true');
+        }
+        if (district_id) {
+             conditions.push('a.district_id = ?');
+             values.push(district_id);
+        }
         if (search) {
-            conditions.push('MATCH(a.title, a.summary, a.content) AGAINST(? IN NATURAL LANGUAGE MODE)');
-            values.push(search);
+            // Using LIKE for broader compatibility / logic
+            conditions.push('(a.title LIKE ? OR a.summary LIKE ? OR a.content LIKE ?)');
+            const searchPattern = `%${search}%`;
+            values.push(searchPattern, searchPattern, searchPattern);
         }
 
         const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+        // Sorting Logic
+        const allowedSortColumns = {
+            'createdAt': 'a.created_at',
+            'title': 'a.title',
+            'views_count': 'a.views_count',
+            'published_at': 'a.published_at'
+        };
+        const sortColumn = allowedSortColumns[sortBy] || 'a.created_at';
+        const sortDirection = order.toLowerCase() === 'asc' ? 'ASC' : 'DESC';
+        const orderByClause = `ORDER BY ${sortColumn} ${sortDirection}`;
 
         // Get total count
         const countQuery = `
@@ -219,8 +250,9 @@ const getArticles = async (req, res) => {
         const articlesQuery = `
             SELECT 
                 a.id, a.title, a.slug, a.summary, a.featured_image,
-                a.is_premium, a.is_breaking, a.is_featured, a.status,
-                a.published_at, a.views_count,
+                a.is_premium, a.is_breaking, a.is_featured, a.is_trending, a.is_hero, 
+                a.district_id, a.status,
+                a.published_at, a.views_count, a.created_at,
                 s.name as section_name, s.slug as section_slug,
                 sub.name as subsection_name, sub.slug as subsection_slug,
                 u.name as author_name,
@@ -233,12 +265,15 @@ const getArticles = async (req, res) => {
             LEFT JOIN subsections sub ON a.subsection_id = sub.id
             LEFT JOIN users u ON a.author_id = u.id
             ${whereClause}
-            ORDER BY a.published_at DESC, a.created_at DESC
+            ${orderByClause}
             LIMIT ? OFFSET ?
         `;
 
-        values.push(parseInt(limit), offset);
-        const articles = await query(articlesQuery, values);
+        // We must push limit and offset to values array *after* the where clause params
+        // note: values array already has WHERE parameters
+        const queryValues = [...values, parseInt(limit), parseInt(offset)];
+        
+        const articles = await query(articlesQuery, queryValues);
 
         res.json({
             success: true,
@@ -387,7 +422,8 @@ const updateArticle = async (req, res) => {
             tags,
             placements,
             district_id,
-            is_trending
+            is_trending,
+            is_hero
         } = req.body;
 
         await transaction(async (connection) => {
@@ -445,6 +481,10 @@ const updateArticle = async (req, res) => {
             if (is_trending !== undefined) {
                 updates.push('is_trending = ?');
                 values.push(is_trending);
+            }
+            if (is_hero !== undefined) {
+                updates.push('is_hero = ?');
+                values.push(is_hero);
             }
             if (district_id !== undefined) {
                  // Resolve if string name

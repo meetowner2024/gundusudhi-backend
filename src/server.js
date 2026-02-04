@@ -18,6 +18,7 @@ const uploadRoutes = require('./routes/uploadRoutes');
 const pageRoutes = require('./routes/pageRoutes');
 const settingsRoutes = require('./routes/settingsRoutes');
 const dynamicContentRoutes = require('./routes/dynamicContentRoutes');
+const magazineRoutes = require('./routes/magazineRoutes');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -78,6 +79,7 @@ app.use('/api/v1/upload', uploadRoutes);
 app.use('/api/v1/page', pageRoutes);
 app.use('/api/v1/settings', settingsRoutes);
 app.use('/api/v1/content', dynamicContentRoutes);
+app.use('/api/v1/magazines', magazineRoutes);
 
 // 404 handler
 app.use((req, res) => {
