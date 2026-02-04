@@ -1,0 +1,572 @@
+const { query, transaction } = require('../config/database');
+
+// Create news article
+const createArticle = async (req, res) => {
+    try {
+        const {
+            title,
+            slug,
+            summary,
+            content,
+            section_id,
+            subsection_id,
+            featured_image,
+            is_premium,
+            is_breaking,
+            is_featured,
+            is_trending,
+            status,
+            tags,
+            placements,
+            district_id,
+            mandal_name
+        } = req.body;
+
+        if (!title || !slug || !content || !section_id) {
+            return res.status(400).json({
+                success: false,
+                message: 'Title, slug, content, and section are required'
+            });
+        }
+
+        const result = await transaction(async (connection) => {
+            // Resolve District ID
+            let resolvedDistrictId = null;
+            if (district_id) {
+                 // Try to find by ID or Name
+                 const [dist] = await connection.execute('SELECT id FROM districts WHERE name = ? OR id = ? LIMIT 1', [district_id, district_id]);
+                 if (dist.length > 0) resolvedDistrictId = dist[0].id;
+            }
+
+            // Handle Tags & Mandal
+            let finalTags = [];
+            if (Array.isArray(tags)) finalTags = [...tags];
+            else if (typeof tags === 'string' && tags.trim()) finalTags = tags.split(',').map(t => t.trim());
+            
+            if (mandal_name) finalTags.push(mandal_name);
+
+            // Insert article
+            const [articleResult] = await connection.execute(
+                `INSERT INTO news_articles 
+                 (title, slug, summary, content, section_id, subsection_id, author_id, 
+                  featured_image, is_premium, is_breaking, is_featured, is_trending, district_id, status, published_at) 
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [
+                    title,
+                    slug,
+                    summary || null,
+                    content,
+                    section_id,
+                    subsection_id || null,
+                    req.user.id,
+                    featured_image || null,
+                    is_premium || false,
+                    is_breaking || false,
+                    is_featured || false,
+                    is_trending || false,
+                    resolvedDistrictId,
+                    status || 'DRAFT',
+                    status === 'PUBLISHED' ? new Date() : null
+                ]
+            );
+
+            const articleId = articleResult.insertId;
+
+            // Insert tags
+            if (finalTags.length > 0) {
+                for (const tagName of finalTags) {
+                    if(!tagName) continue;
+                    // Check if tag exists
+                    const [existingTag] = await connection.execute(
+                        'SELECT id FROM news_tags WHERE name = ?',
+                        [tagName]
+                    );
+
+                    let tagId;
+                    if (existingTag.length > 0) {
+                        tagId = existingTag[0].id;
+                    } else {
+                        // Create new tag
+                        const tagSlug = tagName.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+                        const [newTag] = await connection.execute(
+                            'INSERT INTO news_tags (name, slug) VALUES (?, ?)',
+                            [tagName, tagSlug]
+                        );
+                        tagId = newTag.insertId;
+                    }
+
+                    // Link tag to article
+                    await connection.execute(
+                        'INSERT INTO news_article_tags (news_article_id, tag_id) VALUES (?, ?)',
+                        [articleId, tagId]
+                    );
+                }
+            }
+
+            // Link District (news_districts)
+            if (resolvedDistrictId) {
+                await connection.execute(
+                    'INSERT INTO news_districts (news_article_id, district_id) VALUES (?, ?)',
+                    [articleId, resolvedDistrictId]
+                );
+            }
+
+            // Insert placements if provided
+            if (placements && Array.isArray(placements) && placements.length > 0) {
+                for (const placement of placements) {
+                    await connection.execute(
+                        'INSERT INTO news_placements (news_article_id, position) VALUES (?, ?)',
+                        [articleId, placement]
+                    );
+                }
+            }
+
+            return articleId;
+        });
+
+        res.status(201).json({
+            success: true,
+            message: 'Article created successfully',
+            data: {
+                id: result,
+                title,
+                slug
+            }
+        });
+
+    } catch (error) {
+        console.error('Create article error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to create article',
+            error: error.message
+        });
+    }
+};
+
+// Get all articles with filters
+const getArticles = async (req, res) => {
+    try {
+        const {
+            section,
+            subsection,
+            status,
+            is_premium,
+            is_breaking,
+            is_featured,
+            page = 1,
+            limit = 20,
+            search
+        } = req.query;
+
+        const offset = (page - 1) * limit;
+        const conditions = [];
+        const values = [];
+
+        // Build WHERE clause
+        if (section) {
+            conditions.push('s.slug = ?');
+            values.push(section);
+        }
+        if (subsection) {
+            conditions.push('sub.slug = ?');
+            values.push(subsection);
+        }
+
+        // Status filtering (Admin sees all by default, Public sees only PUBLISHED)
+        const isAdmin = req.user && ['ADMIN', 'EDITOR'].includes(req.user.role);
+        
+        if (isAdmin) {
+             if (status && status !== 'all') {
+                 conditions.push('a.status = ?');
+                 values.push(status);
+             }
+        } else {
+             conditions.push('a.status = ?');
+             values.push('PUBLISHED');
+        }
+        if (is_premium !== undefined) {
+            conditions.push('a.is_premium = ?');
+            values.push(is_premium === 'true');
+        }
+        if (is_breaking !== undefined) {
+            conditions.push('a.is_breaking = ?');
+            values.push(is_breaking === 'true');
+        }
+        if (is_featured !== undefined) {
+            conditions.push('a.is_featured = ?');
+            values.push(is_featured === 'true');
+        }
+        if (search) {
+            conditions.push('MATCH(a.title, a.summary, a.content) AGAINST(? IN NATURAL LANGUAGE MODE)');
+            values.push(search);
+        }
+
+        const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+        // Get total count
+        const countQuery = `
+            SELECT COUNT(*) as total
+            FROM news_articles a
+            LEFT JOIN sections s ON a.section_id = s.id
+            LEFT JOIN subsections sub ON a.subsection_id = sub.id
+            ${whereClause}
+        `;
+        const [countResult] = await query(countQuery, values);
+        const total = countResult.total;
+
+        // Get articles
+        const articlesQuery = `
+            SELECT 
+                a.id, a.title, a.slug, a.summary, a.featured_image,
+                a.is_premium, a.is_breaking, a.is_featured, a.status,
+                a.published_at, a.views_count,
+                s.name as section_name, s.slug as section_slug,
+                sub.name as subsection_name, sub.slug as subsection_slug,
+                u.name as author_name,
+                (SELECT JSON_ARRAYAGG(t.name)
+                 FROM news_article_tags nat
+                 JOIN news_tags t ON nat.tag_id = t.id
+                 WHERE nat.news_article_id = a.id) as tags
+            FROM news_articles a
+            LEFT JOIN sections s ON a.section_id = s.id
+            LEFT JOIN subsections sub ON a.subsection_id = sub.id
+            LEFT JOIN users u ON a.author_id = u.id
+            ${whereClause}
+            ORDER BY a.published_at DESC, a.created_at DESC
+            LIMIT ? OFFSET ?
+        `;
+
+        values.push(parseInt(limit), offset);
+        const articles = await query(articlesQuery, values);
+
+        res.json({
+            success: true,
+            data: {
+                articles,
+                pagination: {
+                    page: parseInt(page),
+                    limit: parseInt(limit),
+                    total,
+                    totalPages: Math.ceil(total / limit)
+                }
+            }
+        });
+
+    } catch (error) {
+        console.error('Get articles error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to fetch articles',
+            error: error.message
+        });
+    }
+};
+
+// Get single article by ID (Admin)
+const getArticleById = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        const articles = await query(
+            `SELECT 
+                a.*, 
+                s.name as section_name,
+                sub.name as subsection_name,
+                (SELECT JSON_ARRAYAGG(t.name)
+                 FROM news_article_tags nat
+                 JOIN news_tags t ON nat.tag_id = t.id
+                 WHERE nat.news_article_id = a.id) as tags,
+                (SELECT JSON_ARRAYAGG(np.position)
+                 FROM news_placements np
+                 WHERE np.news_article_id = a.id) as placements
+            FROM news_articles a
+            LEFT JOIN sections s ON a.section_id = s.id
+            LEFT JOIN subsections sub ON a.subsection_id = sub.id
+            WHERE a.id = ?`,
+            [id]
+        );
+
+        if (articles.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'Article not found'
+            });
+        }
+
+        res.json({
+            success: true,
+            data: articles[0]
+        });
+
+    } catch (error) {
+        console.error('Get article error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to fetch article',
+            error: error.message
+        });
+    }
+};
+
+// Get single article by slug
+const getArticleBySlug = async (req, res) => {
+    try {
+        const { slug } = req.params;
+
+        const articles = await query(
+            `SELECT 
+                a.*, 
+                s.name as section_name, s.slug as section_slug,
+                sub.name as subsection_name, sub.slug as subsection_slug,
+                u.name as author_name, u.email as author_email,
+                (SELECT JSON_ARRAYAGG(t.name)
+                 FROM news_article_tags nat
+                 JOIN news_tags t ON nat.tag_id = t.id
+                 WHERE nat.news_article_id = a.id) as tags
+            FROM news_articles a
+            LEFT JOIN sections s ON a.section_id = s.id
+            LEFT JOIN subsections sub ON a.subsection_id = sub.id
+            LEFT JOIN users u ON a.author_id = u.id
+            WHERE a.slug = ? AND a.status = 'PUBLISHED'`,
+            [slug]
+        );
+
+        if (articles.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'Article not found'
+            });
+        }
+
+        // Increment view count
+        await query(
+            'UPDATE news_articles SET views_count = views_count + 1 WHERE id = ?',
+            [articles[0].id]
+        );
+
+        // Track view (optional - for analytics)
+        if (req.user) {
+            await query(
+                'INSERT INTO article_views (article_id, user_id, ip_address) VALUES (?, ?, ?)',
+                [articles[0].id, req.user.id, req.ip]
+            );
+        }
+
+        res.json({
+            success: true,
+            data: articles[0]
+        });
+
+    } catch (error) {
+        console.error('Get article error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to fetch article',
+            error: error.message
+        });
+    }
+};
+
+// Update article
+const updateArticle = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const {
+            title,
+            slug,
+            summary,
+            content,
+            section_id,
+            subsection_id,
+            featured_image,
+            is_premium,
+            is_breaking,
+            is_featured,
+            status,
+            tags,
+            placements,
+            district_id,
+            is_trending
+        } = req.body;
+
+        await transaction(async (connection) => {
+            const updates = [];
+            const values = [];
+
+            if (title !== undefined) {
+                updates.push('title = ?');
+                values.push(title);
+            }
+            if (slug !== undefined) {
+                updates.push('slug = ?');
+                values.push(slug);
+            }
+            if (summary !== undefined) {
+                updates.push('summary = ?');
+                values.push(summary);
+            }
+            if (content !== undefined) {
+                updates.push('content = ?');
+                values.push(content);
+            }
+            if (section_id !== undefined) {
+                updates.push('section_id = ?');
+                values.push(section_id);
+            }
+            if (subsection_id !== undefined) {
+                updates.push('subsection_id = ?');
+                values.push(subsection_id);
+            }
+            if (featured_image !== undefined) {
+                updates.push('featured_image = ?');
+                values.push(featured_image);
+            }
+            if (is_premium !== undefined) {
+                updates.push('is_premium = ?');
+                values.push(is_premium);
+            }
+            if (is_breaking !== undefined) {
+                updates.push('is_breaking = ?');
+                values.push(is_breaking);
+            }
+            if (is_featured !== undefined) {
+                updates.push('is_featured = ?');
+                values.push(is_featured);
+            }
+            if (status !== undefined) {
+                updates.push('status = ?');
+                values.push(status);
+                if (status === 'PUBLISHED') {
+                    updates.push('published_at = ?');
+                    values.push(new Date());
+                }
+            }
+            if (is_trending !== undefined) {
+                updates.push('is_trending = ?');
+                values.push(is_trending);
+            }
+            if (district_id !== undefined) {
+                 // Resolve if string name
+                 let dId = district_id;
+                 if (district_id && isNaN(district_id)) {
+                      const [d] = await connection.execute('SELECT id FROM districts WHERE name = ? LIMIT 1', [district_id]);
+                      if (d.length > 0) dId = d[0].id;
+                 }
+                 updates.push('district_id = ?');
+                 values.push(dId);
+            }
+
+            if (updates.length > 0) {
+                values.push(id);
+                await connection.execute(
+                    `UPDATE news_articles SET ${updates.join(', ')} WHERE id = ?`,
+                    values
+                );
+            }
+
+            // Update tags if provided
+            if (tags && Array.isArray(tags)) {
+                // Remove existing tags
+                await connection.execute(
+                    'DELETE FROM news_article_tags WHERE news_article_id = ?',
+                    [id]
+                );
+
+                // Add new tags
+                for (const tagName of tags) {
+                    const [existingTag] = await connection.execute(
+                        'SELECT id FROM news_tags WHERE name = ?',
+                        [tagName]
+                    );
+
+                    let tagId;
+                    if (existingTag.length > 0) {
+                        tagId = existingTag[0].id;
+                    } else {
+                        const tagSlug = tagName.toLowerCase().replace(/\s+/g, '-');
+                        const [newTag] = await connection.execute(
+                            'INSERT INTO news_tags (name, slug) VALUES (?, ?)',
+                            [tagName, tagSlug]
+                        );
+                        tagId = newTag.insertId;
+                    }
+
+                    await connection.execute(
+                        'INSERT INTO news_article_tags (news_article_id, tag_id) VALUES (?, ?)',
+                        [id, tagId]
+                    );
+                }
+            }
+
+            // Update placements if provided
+            if (placements && Array.isArray(placements)) {
+                // Remove existing
+                await connection.execute(
+                    'DELETE FROM news_placements WHERE news_article_id = ?',
+                    [id]
+                );
+
+                // Add new
+                for (const placement of placements) {
+                    await connection.execute(
+                        'INSERT INTO news_placements (news_article_id, position) VALUES (?, ?)',
+                        [id, placement]
+                    );
+                }
+            }
+        });
+
+        res.json({
+            success: true,
+            message: 'Article updated successfully'
+        });
+
+    } catch (error) {
+        console.error('Update article error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to update article',
+            error: error.message
+        });
+    }
+};
+
+// Delete article
+const deleteArticle = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        await transaction(async (connection) => {
+            // Delete related data first (unless ON DELETE CASCADE is set, but this is safer)
+            await connection.execute('DELETE FROM news_article_tags WHERE news_article_id = ?', [id]);
+            await connection.execute('DELETE FROM news_placements WHERE news_article_id = ?', [id]);
+            await connection.execute('DELETE FROM article_views WHERE article_id = ?', [id]);
+            
+            // Delete article
+            await connection.execute('DELETE FROM news_articles WHERE id = ?', [id]);
+        });
+
+        res.json({
+            success: true,
+            message: 'Article deleted successfully'
+        });
+
+    } catch (error) {
+        console.error('Delete article error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to delete article',
+            error: error.message
+        });
+    }
+};
+
+module.exports = {
+    createArticle,
+    getArticles,
+    getArticleBySlug,
+    updateArticle,
+    deleteArticle,
+    getArticleById
+};
