@@ -1,7 +1,5 @@
 const mysql = require('mysql2/promise');
 require('dotenv').config();
-
-// Create connection pool for better performance
 const pool = mysql.createPool({
     host: process.env.DB_HOST || 'localhost',
     port: process.env.DB_PORT || 3306,
@@ -15,8 +13,6 @@ const pool = mysql.createPool({
     keepAliveInitialDelay: 0,
     charset: 'utf8mb4'
 });
-
-// Test database connection
 const testConnection = async () => {
     try {
         const connection = await pool.getConnection();
@@ -28,11 +24,8 @@ const testConnection = async () => {
         return false;
     }
 };
-
-// Helper function to execute queries
 const query = async (sql, params = []) => {
     try {
-        
         const [results] = await pool.query(sql, params);
         return results;
     } catch (error) {
@@ -40,12 +33,9 @@ const query = async (sql, params = []) => {
         throw error;
     }
 };
-
-// Helper function for transactions
 const transaction = async (callback) => {
     const connection = await pool.getConnection();
     await connection.beginTransaction();
-    
     try {
         const result = await callback(connection);
         await connection.commit();
@@ -57,7 +47,6 @@ const transaction = async (callback) => {
         throw error;
     }
 };
-
 module.exports = {
     pool,
     query,

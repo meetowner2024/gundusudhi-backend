@@ -1,12 +1,9 @@
 const { query } = require('../config/database');
-
-// Get site settings (header, footer, etc.)
 const getSiteSettings = async (req, res) => {
     try {
         const settings = await query(
             `SELECT setting_key, setting_value FROM site_settings WHERE is_active = TRUE`
         );
-
         const settingsObj = {};
         settings.forEach(s => {
             try {
@@ -15,12 +12,10 @@ const getSiteSettings = async (req, res) => {
                 settingsObj[s.setting_key] = s.setting_value;
             }
         });
-
         res.json({
             success: true,
             data: settingsObj
         });
-
     } catch (error) {
         console.error('Get site settings error:', error);
         res.status(500).json({
@@ -30,16 +25,12 @@ const getSiteSettings = async (req, res) => {
         });
     }
 };
-
-// Get header configuration
 const getHeaderConfig = async (req, res) => {
     try {
         const settings = await query(
             `SELECT setting_value FROM site_settings WHERE setting_key = 'header_config' AND is_active = TRUE`
         );
-
         if (settings.length === 0) {
-            // Return default header config
             return res.json({
                 success: true,
                 data: {
@@ -58,12 +49,10 @@ const getHeaderConfig = async (req, res) => {
                 }
             });
         }
-
         res.json({
             success: true,
             data: JSON.parse(settings[0].setting_value)
         });
-
     } catch (error) {
         console.error('Get header config error:', error);
         res.status(500).json({
@@ -73,18 +62,13 @@ const getHeaderConfig = async (req, res) => {
         });
     }
 };
-
-// Update header configuration
 const updateHeaderConfig = async (req, res) => {
     try {
         const config = req.body;
         const configJson = JSON.stringify(config);
-
-        // Check if exists
         const existing = await query(
             `SELECT id FROM site_settings WHERE setting_key = 'header_config'`
         );
-
         if (existing.length > 0) {
             await query(
                 `UPDATE site_settings SET setting_value = ? WHERE setting_key = 'header_config'`,
@@ -96,12 +80,10 @@ const updateHeaderConfig = async (req, res) => {
                 [configJson]
             );
         }
-
         res.json({
             success: true,
             message: 'Header configuration updated successfully'
         });
-
     } catch (error) {
         console.error('Update header config error:', error);
         res.status(500).json({
@@ -111,16 +93,12 @@ const updateHeaderConfig = async (req, res) => {
         });
     }
 };
-
-// Get footer configuration
 const getFooterConfig = async (req, res) => {
     try {
         const settings = await query(
             `SELECT setting_value FROM site_settings WHERE setting_key = 'footer_config' AND is_active = TRUE`
         );
-
         if (settings.length === 0) {
-            // Return default footer config
             return res.json({
                 success: true,
                 data: {
@@ -145,12 +123,10 @@ const getFooterConfig = async (req, res) => {
                 }
             });
         }
-
         res.json({
             success: true,
             data: JSON.parse(settings[0].setting_value)
         });
-
     } catch (error) {
         console.error('Get footer config error:', error);
         res.status(500).json({
@@ -160,17 +136,13 @@ const getFooterConfig = async (req, res) => {
         });
     }
 };
-
-// Update footer configuration
 const updateFooterConfig = async (req, res) => {
     try {
         const config = req.body;
         const configJson = JSON.stringify(config);
-
         const existing = await query(
             `SELECT id FROM site_settings WHERE setting_key = 'footer_config'`
         );
-
         if (existing.length > 0) {
             await query(
                 `UPDATE site_settings SET setting_value = ? WHERE setting_key = 'footer_config'`,
@@ -182,12 +154,10 @@ const updateFooterConfig = async (req, res) => {
                 [configJson]
             );
         }
-
         res.json({
             success: true,
             message: 'Footer configuration updated successfully'
         });
-
     } catch (error) {
         console.error('Update footer config error:', error);
         res.status(500).json({
@@ -197,8 +167,6 @@ const updateFooterConfig = async (req, res) => {
         });
     }
 };
-
-// Get navigation menu
 const getNavigationMenu = async (req, res) => {
     try {
         const sections = await query(
@@ -210,12 +178,10 @@ const getNavigationMenu = async (req, res) => {
              WHERE s.is_active = TRUE
              ORDER BY s.display_order`
         );
-
         res.json({
             success: true,
             data: sections
         });
-
     } catch (error) {
         console.error('Get navigation menu error:', error);
         res.status(500).json({
@@ -225,7 +191,6 @@ const getNavigationMenu = async (req, res) => {
         });
     }
 };
-
 module.exports = {
     getSiteSettings,
     getHeaderConfig,

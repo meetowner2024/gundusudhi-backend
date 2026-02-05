@@ -1,5 +1,4 @@
 const { query, transaction } = require('../config/database');
-
 const createArticle = async (req, res) => {
     try {
         const {
@@ -21,31 +20,22 @@ const createArticle = async (req, res) => {
             district_id,
             mandal_name
         } = req.body;
-
         if (!title || !slug || !content || !section_id) {
             return res.status(400).json({
                 success: false,
                 message: 'Title, slug, content, and section are required'
             });
         }
-
         const result = await transaction(async (connection) => {
-            // Resolve District ID
             let resolvedDistrictId = null;
             if (district_id) {
-                 // Try to find by ID or Name
                  const [dist] = await connection.execute('SELECT id FROM districts WHERE name = ? OR id = ? LIMIT 1', [district_id, district_id]);
                  if (dist.length > 0) resolvedDistrictId = dist[0].id;
             }
-
-            // Handle Tags & Mandal
             let finalTags = [];
             if (Array.isArray(tags)) finalTags = [...tags];
             else if (typeof tags === 'string' && tags.trim()) finalTags = tags.split(',').map(t => t.trim());
-            
             if (mandal_name) finalTags.push(mandal_name);
-
-            // Insert article
             const [articleResult] = await connection.execute(
                 `INSERT INTO news_articles 
                  (title, slug, summary, content, section_id, subsection_id, author_id, 
@@ -70,24 +60,18 @@ const createArticle = async (req, res) => {
                     status === 'PUBLISHED' ? new Date() : null
                 ]
             );
-
             const articleId = articleResult.insertId;
-
-            // Insert tags
             if (finalTags.length > 0) {
                 for (const tagName of finalTags) {
                     if(!tagName) continue;
-                    // Check if tag exists
                     const [existingTag] = await connection.execute(
                         'SELECT id FROM news_tags WHERE name = ?',
                         [tagName]
                     );
-
                     let tagId;
                     if (existingTag.length > 0) {
                         tagId = existingTag[0].id;
                     } else {
-                        // Create new tag
                         const tagSlug = tagName.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
                         const [newTag] = await connection.execute(
                             'INSERT INTO news_tags (name, slug) VALUES (?, ?)',
@@ -95,24 +79,18 @@ const createArticle = async (req, res) => {
                         );
                         tagId = newTag.insertId;
                     }
-
-                    // Link tag to article
                     await connection.execute(
                         'INSERT INTO news_article_tags (news_article_id, tag_id) VALUES (?, ?)',
                         [articleId, tagId]
                     );
                 }
             }
-
-            // Link District (news_districts)
             if (resolvedDistrictId) {
                 await connection.execute(
                     'INSERT INTO news_districts (news_article_id, district_id) VALUES (?, ?)',
                     [articleId, resolvedDistrictId]
                 );
             }
-
-            // Insert placements if provided
             if (placements && Array.isArray(placements) && placements.length > 0) {
                 for (const placement of placements) {
                     await connection.execute(
@@ -121,10 +99,8 @@ const createArticle = async (req, res) => {
                     );
                 }
             }
-
             return articleId;
         });
-
         res.status(201).json({
             success: true,
             message: 'Article created successfully',
@@ -134,7 +110,6 @@ const createArticle = async (req, res) => {
                 slug
             }
         });
-
     } catch (error) {
         console.error('Create article error:', error);
         res.status(500).json({
@@ -144,8 +119,6 @@ const createArticle = async (req, res) => {
         });
     }
 };
-
-// Get all articles with filters
 const getArticles = async (req, res) => {
     try {
         const {
@@ -162,14 +135,12 @@ const getArticles = async (req, res) => {
             limit = 20,
             search,
             sortBy = 'createdAt',
-            order = 'desc'
+            order = 'desc',
+            date
         } = req.query;
-
         const offset = (page - 1) * limit;
         const conditions = [];
         const values = [];
-
-        // Build WHERE clause
         if (section) {
             conditions.push('s.slug = ?');
             values.push(section);
@@ -178,10 +149,11 @@ const getArticles = async (req, res) => {
             conditions.push('sub.slug = ?');
             values.push(subsection);
         }
-
-        // Status filtering (Admin sees all by default, Public sees only PUBLISHED)
         const isAdmin = req.user && ['ADMIN', 'EDITOR'].includes(req.user.role);
-        
+        if (date) {
+            conditions.push('DATE(a.published_at) = ?');
+            values.push(date);
+        }
         if (isAdmin) {
              if (status && status !== 'all') {
                  conditions.push('a.status = ?');
@@ -216,15 +188,11 @@ const getArticles = async (req, res) => {
              values.push(district_id);
         }
         if (search) {
-            // Using LIKE for broader compatibility / logic
             conditions.push('(a.title LIKE ? OR a.summary LIKE ? OR a.content LIKE ?)');
             const searchPattern = `%${search}%`;
             values.push(searchPattern, searchPattern, searchPattern);
         }
-
         const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-
-        // Sorting Logic
         const allowedSortColumns = {
             'createdAt': 'a.created_at',
             'title': 'a.title',
@@ -234,8 +202,6 @@ const getArticles = async (req, res) => {
         const sortColumn = allowedSortColumns[sortBy] || 'a.created_at';
         const sortDirection = order.toLowerCase() === 'asc' ? 'ASC' : 'DESC';
         const orderByClause = `ORDER BY ${sortColumn} ${sortDirection}`;
-
-        // Get total count
         const countQuery = `
             SELECT COUNT(*) as total
             FROM news_articles a
@@ -245,8 +211,6 @@ const getArticles = async (req, res) => {
         `;
         const [countResult] = await query(countQuery, values);
         const total = countResult.total;
-
-        // Get articles
         const articlesQuery = `
             SELECT 
                 a.id, a.title, a.slug, a.summary, a.featured_image,
@@ -268,13 +232,8 @@ const getArticles = async (req, res) => {
             ${orderByClause}
             LIMIT ? OFFSET ?
         `;
-
-        // We must push limit and offset to values array *after* the where clause params
-        // note: values array already has WHERE parameters
         const queryValues = [...values, parseInt(limit), parseInt(offset)];
-        
         const articles = await query(articlesQuery, queryValues);
-
         res.json({
             success: true,
             data: {
@@ -287,7 +246,6 @@ const getArticles = async (req, res) => {
                 }
             }
         });
-
     } catch (error) {
         console.error('Get articles error:', error);
         res.status(500).json({
@@ -297,12 +255,9 @@ const getArticles = async (req, res) => {
         });
     }
 };
-
-// Get single article by ID (Admin)
 const getArticleById = async (req, res) => {
     try {
         const { id } = req.params;
-
         const articles = await query(
             `SELECT 
                 a.*, 
@@ -321,19 +276,16 @@ const getArticleById = async (req, res) => {
             WHERE a.id = ?`,
             [id]
         );
-
         if (articles.length === 0) {
             return res.status(404).json({
                 success: false,
                 message: 'Article not found'
             });
         }
-
         res.json({
             success: true,
             data: articles[0]
         });
-
     } catch (error) {
         console.error('Get article error:', error);
         res.status(500).json({
@@ -343,12 +295,9 @@ const getArticleById = async (req, res) => {
         });
     }
 };
-
-// Get single article by slug
 const getArticleBySlug = async (req, res) => {
     try {
         const { slug } = req.params;
-
         const articles = await query(
             `SELECT 
                 a.*, 
@@ -366,33 +315,26 @@ const getArticleBySlug = async (req, res) => {
             WHERE a.slug = ? AND a.status = 'PUBLISHED'`,
             [slug]
         );
-
         if (articles.length === 0) {
             return res.status(404).json({
                 success: false,
                 message: 'Article not found'
             });
         }
-
-        // Increment view count
         await query(
             'UPDATE news_articles SET views_count = views_count + 1 WHERE id = ?',
             [articles[0].id]
         );
-
-        // Track view (optional - for analytics)
         if (req.user) {
             await query(
                 'INSERT INTO article_views (article_id, user_id, ip_address) VALUES (?, ?, ?)',
                 [articles[0].id, req.user.id, req.ip]
             );
         }
-
         res.json({
             success: true,
             data: articles[0]
         });
-
     } catch (error) {
         console.error('Get article error:', error);
         res.status(500).json({
@@ -402,8 +344,6 @@ const getArticleBySlug = async (req, res) => {
         });
     }
 };
-
-// Update article
 const updateArticle = async (req, res) => {
     try {
         const { id } = req.params;
@@ -425,11 +365,9 @@ const updateArticle = async (req, res) => {
             is_trending,
             is_hero
         } = req.body;
-
         await transaction(async (connection) => {
             const updates = [];
             const values = [];
-
             if (title !== undefined) {
                 updates.push('title = ?');
                 values.push(title);
@@ -487,7 +425,6 @@ const updateArticle = async (req, res) => {
                 values.push(is_hero);
             }
             if (district_id !== undefined) {
-                 // Resolve if string name
                  let dId = district_id;
                  if (district_id && isNaN(district_id)) {
                       const [d] = await connection.execute('SELECT id FROM districts WHERE name = ? LIMIT 1', [district_id]);
@@ -496,7 +433,6 @@ const updateArticle = async (req, res) => {
                  updates.push('district_id = ?');
                  values.push(dId);
             }
-
             if (updates.length > 0) {
                 values.push(id);
                 await connection.execute(
@@ -504,22 +440,16 @@ const updateArticle = async (req, res) => {
                     values
                 );
             }
-
-            // Update tags if provided
             if (tags && Array.isArray(tags)) {
-                // Remove existing tags
                 await connection.execute(
                     'DELETE FROM news_article_tags WHERE news_article_id = ?',
                     [id]
                 );
-
-                // Add new tags
                 for (const tagName of tags) {
                     const [existingTag] = await connection.execute(
                         'SELECT id FROM news_tags WHERE name = ?',
                         [tagName]
                     );
-
                     let tagId;
                     if (existingTag.length > 0) {
                         tagId = existingTag[0].id;
@@ -531,23 +461,17 @@ const updateArticle = async (req, res) => {
                         );
                         tagId = newTag.insertId;
                     }
-
                     await connection.execute(
                         'INSERT INTO news_article_tags (news_article_id, tag_id) VALUES (?, ?)',
                         [id, tagId]
                     );
                 }
             }
-
-            // Update placements if provided
             if (placements && Array.isArray(placements)) {
-                // Remove existing
                 await connection.execute(
                     'DELETE FROM news_placements WHERE news_article_id = ?',
                     [id]
                 );
-
-                // Add new
                 for (const placement of placements) {
                     await connection.execute(
                         'INSERT INTO news_placements (news_article_id, position) VALUES (?, ?)',
@@ -556,12 +480,10 @@ const updateArticle = async (req, res) => {
                 }
             }
         });
-
         res.json({
             success: true,
             message: 'Article updated successfully'
         });
-
     } catch (error) {
         console.error('Update article error:', error);
         res.status(500).json({
@@ -571,27 +493,19 @@ const updateArticle = async (req, res) => {
         });
     }
 };
-
-// Delete article
 const deleteArticle = async (req, res) => {
     try {
         const { id } = req.params;
-
         await transaction(async (connection) => {
-            // Delete related data first (unless ON DELETE CASCADE is set, but this is safer)
             await connection.execute('DELETE FROM news_article_tags WHERE news_article_id = ?', [id]);
             await connection.execute('DELETE FROM news_placements WHERE news_article_id = ?', [id]);
             await connection.execute('DELETE FROM article_views WHERE article_id = ?', [id]);
-            
-            // Delete article
             await connection.execute('DELETE FROM news_articles WHERE id = ?', [id]);
         });
-
         res.json({
             success: true,
             message: 'Article deleted successfully'
         });
-
     } catch (error) {
         console.error('Delete article error:', error);
         res.status(500).json({
@@ -601,7 +515,6 @@ const deleteArticle = async (req, res) => {
         });
     }
 };
-
 module.exports = {
     createArticle,
     getArticles,
