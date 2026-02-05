@@ -3,8 +3,6 @@ const router = express.Router();
 const dynamicContentController = require('../controllers/dynamicContentController');
 const { authenticateToken, authorizeRoles } = require('../middleware/auth');
 router.get('/homepage/full', dynamicContentController.getFullHomepageData);
-router.get('/widgets/:widgetType', dynamicContentController.getWidgetWithItems);
-router.get('/editorial/featured', dynamicContentController.getFeaturedEditorial);
 router.get('/trending', dynamicContentController.getTrendingTopics);
 router.get('/videos', dynamicContentController.getYoutubeVideos);
 router.get('/videos/daily', dynamicContentController.getDailyVideo);
@@ -14,13 +12,11 @@ router.get('/districts', dynamicContentController.getDistricts);
 router.get('/districts/:slug/news', dynamicContentController.getDistrictNews);
 router.get('/placements/:position', dynamicContentController.getNewsByPlacement);
 router.get('/highlights', dynamicContentController.getKeyHighlights);
-router.get('/admin/widgets', authenticateToken, authorizeRoles('ADMIN', 'EDITOR'), dynamicContentController.getAllWidgets);
-router.post('/admin/widgets/items', authenticateToken, authorizeRoles('ADMIN', 'EDITOR'), dynamicContentController.saveWidgetItem);
-router.delete('/admin/widgets/items/:id', authenticateToken, authorizeRoles('ADMIN', 'EDITOR'), dynamicContentController.deleteWidgetItem);
-router.get('/admin/editorials', authenticateToken, authorizeRoles('ADMIN', 'EDITOR'), dynamicContentController.getAllEditorials);
-router.post('/admin/editorials', authenticateToken, authorizeRoles('ADMIN', 'EDITOR'), dynamicContentController.saveEditorial);
+
+
 router.post('/admin/trending', authenticateToken, authorizeRoles('ADMIN', 'EDITOR'), dynamicContentController.saveTrendingTopic);
 router.delete('/admin/trending/:id', authenticateToken, authorizeRoles('ADMIN', 'EDITOR'), dynamicContentController.deleteTrendingTopic);
+router.get('/admin/videos', authenticateToken, authorizeRoles('ADMIN', 'EDITOR'), dynamicContentController.getAllYoutubeVideos);
 router.post('/admin/videos', authenticateToken, authorizeRoles('ADMIN', 'EDITOR'), dynamicContentController.saveYoutubeVideo);
 router.delete('/admin/videos/:id', authenticateToken, authorizeRoles('ADMIN', 'EDITOR'), dynamicContentController.deleteYoutubeVideo);
 router.post('/admin/ads', authenticateToken, authorizeRoles('ADMIN'), dynamicContentController.saveAdvertisement);

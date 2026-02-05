@@ -1,140 +1,6 @@
 const { query } = require('../config/database');
-const getAllWidgets = async (req, res) => {
-    try {
-        const widgets = await query(`
-            SELECT w.*, 
-                   (SELECT COUNT(*) FROM widget_items WHERE widget_id = w.id AND is_active = TRUE) as item_count
-            FROM content_widgets w
-            ORDER BY display_order ASC
-        `);
-        res.json({ success: true, data: widgets });
-    } catch (error) {
-        console.error('Get widgets error:', error);
-        res.status(500).json({ success: false, message: 'Failed to fetch widgets' });
-    }
-};
-const getWidgetWithItems = async (req, res) => {
-    try {
-        const { widgetType } = req.params;
-        const [widget] = await query(
-            'SELECT * FROM content_widgets WHERE widget_type = ? AND is_active = TRUE',
-            [widgetType]
-        );
-        if (!widget) {
-            return res.status(404).json({ success: false, message: 'Widget not found' });
-        }
-        const items = await query(
-            `SELECT * FROM widget_items 
-             WHERE widget_id = ? AND is_active = TRUE 
-             AND (expire_at IS NULL OR expire_at > NOW())
-             ORDER BY display_order ASC`,
-            [widget.id]
-        );
-        res.json({ success: true, data: { ...widget, items } });
-    } catch (error) {
-        console.error('Get widget items error:', error);
-        res.status(500).json({ success: false, message: 'Failed to fetch widget items' });
-    }
-};
-const saveWidgetItem = async (req, res) => {
-    try {
-        const { id, widget_id, title, content, link, image_url, display_order, expire_at } = req.body;
-        if (id) {
-            await query(
-                `UPDATE widget_items SET title = ?, content = ?, link = ?, image_url = ?, 
-                 display_order = ?, expire_at = ? WHERE id = ?`,
-                [title, content, link, image_url, display_order || 0, expire_at, id]
-            );
-        } else {
-            await query(
-                `INSERT INTO widget_items (widget_id, title, content, link, image_url, display_order, expire_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-                [widget_id, title, content, link, image_url, display_order || 0, expire_at]
-            );
-        }
-        res.json({ success: true, message: 'Widget item saved successfully' });
-    } catch (error) {
-        console.error('Save widget item error:', error);
-        res.status(500).json({ success: false, message: 'Failed to save widget item' });
-    }
-};
-const deleteWidgetItem = async (req, res) => {
-    try {
-        const { id } = req.params;
-        await query('DELETE FROM widget_items WHERE id = ?', [id]);
-        res.json({ success: true, message: 'Widget item deleted successfully' });
-    } catch (error) {
-        console.error('Delete widget item error:', error);
-        res.status(500).json({ success: false, message: 'Failed to delete widget item' });
-    }
-};
-const getAllEditorials = async (req, res) => {
-    try {
-        const page = parseInt(req.query.page) || 1;
-        const limit = parseInt(req.query.limit) || 10;
-        const offset = (page - 1) * limit;
-        const editorials = await query(
-            `SELECT * FROM editorials ORDER BY created_at DESC LIMIT ? OFFSET ?`,
-            [limit, offset]
-        );
-        const [countResult] = await query('SELECT COUNT(*) as total FROM editorials');
-        res.json({
-            success: true,
-            data: {
-                editorials,
-                pagination: {
-                    page,
-                    limit,
-                    total: countResult.total,
-                    totalPages: Math.ceil(countResult.total / limit)
-                }
-            }
-        });
-    } catch (error) {
-        console.error('Get editorials error:', error);
-        res.status(500).json({ success: false, message: 'Failed to fetch editorials' });
-    }
-};
-const getFeaturedEditorial = async (req, res) => {
-    try {
-        const [editorial] = await query(
-            `SELECT * FROM editorials WHERE is_featured = TRUE AND status = 'PUBLISHED' 
-             ORDER BY published_at DESC LIMIT 1`
-        );
-        res.json({ success: true, data: editorial || null });
-    } catch (error) {
-        console.error('Get featured editorial error:', error);
-        res.status(500).json({ success: false, message: 'Failed to fetch editorial' });
-    }
-};
-const saveEditorial = async (req, res) => {
-    try {
-        const { id, title, slug, author_name, author_image, summary, content, 
-                featured_image, is_featured, status } = req.body;
-        if (id) {
-            await query(
-                `UPDATE editorials SET title = ?, slug = ?, author_name = ?, author_image = ?,
-                 summary = ?, content = ?, featured_image = ?, is_featured = ?, status = ?,
-                 published_at = CASE WHEN status = 'PUBLISHED' AND published_at IS NULL THEN NOW() ELSE published_at END
-                 WHERE id = ?`,
-                [title, slug, author_name, author_image, summary, content, featured_image, 
-                 is_featured || false, status || 'DRAFT', id]
-            );
-        } else {
-            await query(
-                `INSERT INTO editorials (title, slug, author_name, author_image, summary, content, 
-                 featured_image, is_featured, status, published_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CASE WHEN ? = 'PUBLISHED' THEN NOW() ELSE NULL END)`,
-                [title, slug, author_name, author_image, summary, content, featured_image, 
-                 is_featured || false, status || 'DRAFT', status]
-            );
-        }
-        res.json({ success: true, message: 'Editorial saved successfully' });
-    } catch (error) {
-        console.error('Save editorial error:', error);
-        res.status(500).json({ success: false, message: 'Failed to save editorial' });
-    }
-};
+
+
 const getTrendingTopics = async (req, res) => {
     try {
         const topics = await query(
@@ -210,8 +76,18 @@ const getDailyVideo = async (req, res) => {
 };
 const saveYoutubeVideo = async (req, res) => {
     try {
-        const { id, title, youtube_id, description, thumbnail_url, category, 
+        let { id, title, youtube_id, description, thumbnail_url, category, 
                 is_daily_video, display_order } = req.body;
+        
+        // Extract ID if a full URL is provided
+        if (youtube_id && (youtube_id.includes('youtube.com') || youtube_id.includes('youtu.be'))) {
+            const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/;
+            const match = youtube_id.match(regExp);
+            if (match && match[2].length === 11) {
+                youtube_id = match[2];
+            }
+        }
+
         const thumbnail = thumbnail_url || `https://img.youtube.com/vi/${youtube_id}/0.jpg`;
         if (id) {
             await query(
@@ -581,18 +457,51 @@ const getFullHomepageData = async (req, res) => {
         res.status(500).json({ success: false, message: 'Failed to fetch homepage data' });
     }
 };
+const getAllYoutubeVideos = async (req, res) => {
+    try {
+        const { page = 1, limit = 20, search } = req.query;
+        const offset = (page - 1) * limit;
+        
+        let queryStr = 'SELECT * FROM youtube_videos';
+        let countQueryStr = 'SELECT COUNT(*) as total FROM youtube_videos';
+        const params = [];
+
+        if (search) {
+            queryStr += ' WHERE title LIKE ?';
+            countQueryStr += ' WHERE title LIKE ?';
+            params.push(`%${search}%`);
+        }
+
+        queryStr += ' ORDER BY published_at DESC LIMIT ? OFFSET ?';
+        params.push(parseInt(limit), offset);
+
+        const videos = await query(queryStr, params);
+        const [countResult] = await query(countQueryStr, search ? [`%${search}%`] : []);
+
+        res.json({
+            success: true,
+            data: {
+                videos,
+                pagination: {
+                    page: parseInt(page),
+                    limit: parseInt(limit),
+                    total: countResult.total,
+                    totalPages: Math.ceil(countResult.total / limit)
+                }
+            }
+        });
+    } catch (error) {
+        console.error('Get all youtube videos error:', error);
+        res.status(500).json({ success: false, message: 'Failed to fetch videos' });
+    }
+};
+
 module.exports = {
-    getAllWidgets,
-    getWidgetWithItems,
-    saveWidgetItem,
-    deleteWidgetItem,
-    getAllEditorials,
-    getFeaturedEditorial,
-    saveEditorial,
     getTrendingTopics,
     saveTrendingTopic,
     deleteTrendingTopic,
     getYoutubeVideos,
+    getAllYoutubeVideos,
     getDailyVideo,
     saveYoutubeVideo,
     deleteYoutubeVideo,

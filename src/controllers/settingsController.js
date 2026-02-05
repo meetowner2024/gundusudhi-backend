@@ -40,6 +40,25 @@ const getHeaderConfig = async (req, res) => {
                     showMarketTicker: true,
                     showDateTime: true,
                     showSocialLinks: true,
+                    breakingNews: {
+                        show: true,
+                        mode: 'AUTO', // 'AUTO' or 'CUSTOM'
+                        customText: ''
+                    },
+                    marketTicker: {
+                        show: true,
+                        mode: 'AUTO', // 'AUTO' or 'CUSTOM'
+                        customItems: [
+                            { symbol: "GOLD (10g)", price: "62500", change: "120", isUp: true },
+                            { symbol: "SILVER (1kg)", price: "74200", change: "-350", isUp: false },
+                            { symbol: "NIFTY 50", price: "21850", change: "85.5", isUp: true }
+                        ]
+                    },
+                    headerTopLinks: [
+                        { title: 'E-Paper', url: '#' },
+                        { title: 'About Us', url: '/about' },
+                        { title: 'Contact', url: '/contact' }
+                    ],
                     socialLinks: {
                         facebook: '#',
                         twitter: '#',
@@ -103,23 +122,38 @@ const getFooterConfig = async (req, res) => {
                 success: true,
                 data: {
                     aboutText: 'గుండుసూది is your trusted source for Telugu news...',
-                    quickLinks: [
-                        { title: 'About Us', url: '/about' },
-                        { title: 'Contact', url: '/contact' },
-                        { title: 'Privacy Policy', url: '/privacy' }
+                    newsLinks: [
+                        { title: 'State News', url: '/news' },
+                        { title: 'National', url: '/news/national' },
+                        { title: 'World', url: '/news/world' },
+                        { title: 'Politics', url: '/news' },
+                        { title: 'Business', url: '/news/business' }
+                    ],
+                    featureLinks: [
+                        { title: 'Editorials', url: '/blogs' },
+                        { title: 'Sunday Magazine', url: '/magazines' },
+                        { title: 'Visual Stories', url: '/shorts' },
+                        { title: 'Sports', url: '/news/sports' }
                     ],
                     contactInfo: {
-                        email: 'info@gundusudhi.com',
-                        phone: '+91 9876543210',
-                        address: 'Hyderabad, Telangana'
+                        email: 'editors@gundusudhi.com',
+                        phone: '+91 987 654 3210',
+                        address: '123 Journalism Avenue, Media City, Press District - 500001'
                     },
+                    subscriptionText: 'Get the day\'s top headlines delivered to your inbox every morning.',
                     socialLinks: {
                         facebook: '#',
                         twitter: '#',
                         youtube: '#',
                         instagram: '#'
                     },
-                    copyright: '© 2024 గుండుసూది. All rights reserved.'
+                    bottomLinks: [
+                        { title: 'Privacy Policy', url: '#' },
+                        { title: 'Terms of Service', url: '#' },
+                        { title: 'Advertise with us', url: '#' },
+                        { title: 'Archives', url: '#' }
+                    ],
+                    copyright: '© 2024 Gundusudhi Media Group. All rights reserved.'
                 }
             });
         }
