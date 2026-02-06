@@ -25,8 +25,8 @@ Thumbs.db
 *~
 
 # Uploads
-uploads/*
-!uploads/.gitkeep
+# uploads/*
+# !uploads/.gitkeep
 
 # Build
 dist/
