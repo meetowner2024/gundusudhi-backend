@@ -2,7 +2,33 @@ const { query, transaction } = require('../config/database');
 const path = require('path');
 const fs = require('fs').promises;
 const crypto = require('crypto');
-const pdf = require('pdf-poppler');
+const os = require('os');
+const { exec } = require('child_process');
+const util = require('util');
+const execAsync = util.promisify(exec);
+
+// Helper function to handle cross-platform PDF optimization
+const convertPdf = async (pdfPath, outputDir, outputPrefix) => {
+    if (os.platform() === 'win32' || os.platform() === 'darwin') {
+        const pdf = require('pdf-poppler');
+        const opts = {
+            format: 'png',
+            out_dir: outputDir,
+            out_prefix: outputPrefix,
+            page: null
+        };
+        return pdf.convert(pdfPath, opts);
+    } else {
+        // Linux: Use system installed poppler-utils
+        // Command: pdftoppm -png <input> <output_prefix_path>
+        const outputPath = path.join(outputDir, outputPrefix);
+        const command = `pdftoppm -png "${pdfPath}" "${outputPath}"`;
+        console.log(`Executing Linux PDF conversion: ${command}`);
+        const { stdout, stderr } = await execAsync(command);
+        if (stderr) console.error('pdftoppm stderr:', stderr);
+        return stdout;
+    }
+};
 const generateSecureToken = (magazineId, pageNumber, userId, expiresIn = 300) => {
     const payload = {
         mid: magazineId,
@@ -48,13 +74,8 @@ const processPdfInBackground = async (magazineId, pdfPath, outputDir) => {
     try {
         console.log(`Starting background PDF processing for Magazine ${magazineId}...`);
         const outputPrefix = `mag-${magazineId}`;
-        const opts = {
-            format: 'png',
-            out_dir: outputDir,
-            out_prefix: outputPrefix,
-            page: null
-        };
-        await pdf.convert(pdfPath, opts);
+        // Use the cross-platform helper
+        await convertPdf(pdfPath, outputDir, outputPrefix);
         const files = await fs.readdir(outputDir);
         const magFiles = files.filter(f => f.startsWith(`${outputPrefix}-`) && f.endsWith('.png'));
         magFiles.sort((a, b) => {
