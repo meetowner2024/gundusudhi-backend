@@ -526,11 +526,21 @@ const getActivePoll = async (req, res) => {
     try {
         // Ensure tables exist (Lazy Init for Demo compatibility)
         await query(`CREATE TABLE IF NOT EXISTS polls (id INT AUTO_INCREMENT PRIMARY KEY, question TEXT, type VARCHAR(20) DEFAULT 'POLL', is_active BOOLEAN DEFAULT TRUE, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)`);
-        try { await query("ALTER TABLE polls ADD COLUMN type VARCHAR(20) DEFAULT 'POLL'"); } catch (e) {} // Auto-migration
+        
+        // Auto-migration: Check if 'type' column exists
+        const pollColumns = await query("SHOW COLUMNS FROM polls LIKE 'type'");
+        if (pollColumns.length === 0) {
+            await query("ALTER TABLE polls ADD COLUMN type VARCHAR(20) DEFAULT 'POLL'");
+        }
         
         await query(`CREATE TABLE IF NOT EXISTS poll_options (id INT AUTO_INCREMENT PRIMARY KEY, poll_id INT, option_text VARCHAR(255), votes_count INT DEFAULT 0, FOREIGN KEY (poll_id) REFERENCES polls(id) ON DELETE CASCADE)`);
         await query(`CREATE TABLE IF NOT EXISTS poll_votes (id INT AUTO_INCREMENT PRIMARY KEY, poll_id INT, user_id INT, ip_address VARCHAR(45), created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)`);
-        try { await query("ALTER TABLE poll_votes ADD COLUMN user_id INT"); } catch (e) {} // Auto-migration
+        
+        // Auto-migration: Check if 'user_id' column exists
+        const voteColumns = await query("SHOW COLUMNS FROM poll_votes LIKE 'user_id'");
+        if (voteColumns.length === 0) {
+            await query("ALTER TABLE poll_votes ADD COLUMN user_id INT");
+        }
 
         const polls = await query('SELECT * FROM polls WHERE is_active = TRUE ORDER BY created_at DESC LIMIT 1');
         
