@@ -1,4 +1,5 @@
 const { query } = require("../config/database");
+
 const getPageLayout = async (req, res) => {
   try {
     const { pageSlug } = req.params;
@@ -38,6 +39,7 @@ const getPageLayout = async (req, res) => {
     });
   }
 };
+
 const getHomepageData = async (req, res) => {
   try {
     const { date } = req.query;
@@ -120,6 +122,7 @@ const getHomepageData = async (req, res) => {
     });
   }
 };
+
 const getNewsByPosition = async (req, res) => {
   try {
     const { position, limit = 10, date } = req.query;
@@ -165,6 +168,7 @@ const getNewsByPosition = async (req, res) => {
     });
   }
 };
+
 const getSectionNews = async (req, res) => {
   try {
     const { sectionSlug } = req.params;
@@ -231,6 +235,7 @@ const getSectionNews = async (req, res) => {
     });
   }
 };
+
 const getDistrictNews = async (req, res) => {
   try {
     const { districtId } = req.params;
@@ -270,10 +275,141 @@ const getDistrictNews = async (req, res) => {
     });
   }
 };
+
+// --- New Dynamic Page Controller Functions ---
+
+// Get a static page by slug (e.g., 'about', 'contact', 'terms') (Public)
+const getStaticPage = async (req, res) => {
+  try {
+    const { slug } = req.params;
+    const pages = await query(
+      'SELECT * FROM pages WHERE slug = ?',
+      [slug]
+    );
+
+    if (pages.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'Page not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      data: pages[0]
+    });
+  } catch (error) {
+    console.error('Get static page error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch page',
+      error: error.message
+    });
+  }
+};
+
+// Create or Update a static page (Admin)
+const updateStaticPage = async (req, res) => {
+  try {
+    const { slug } = req.params;
+    const { title, content, meta_description } = req.body;
+
+    if (!title || !content) {
+      return res.status(400).json({
+        success: false,
+        message: 'Title and content are required'
+      });
+    }
+
+    // Check if page exists
+    const existing = await query('SELECT id FROM pages WHERE slug = ?', [slug]);
+
+    if(existing.length > 0) {
+        // Update
+        await query(
+            'UPDATE pages SET title = ?, content = ?, meta_description = ?, updated_at = NOW() WHERE slug = ?',
+            [title, content, meta_description || null, slug]
+        );
+        res.json({
+            success: true,
+            message: 'Page updated successfully'
+        });
+    } else {
+        // Create (Insert)
+        await query(
+            'INSERT INTO pages (slug, title, content, meta_description) VALUES (?, ?, ?, ?)',
+            [slug, title, content, meta_description || null]
+        );
+        res.status(201).json({
+            success: true,
+            message: 'Page created successfully'
+        });
+    }
+
+  } catch (error) {
+    console.error('Update static page error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update page',
+      error: error.message
+    });
+  }
+};
+
+// Delete a static page (Admin)
+const deleteStaticPage = async (req, res) => {
+    try {
+        const { slug } = req.params;
+        const result = await query('DELETE FROM pages WHERE slug = ?', [slug]);
+        
+        if (result.affectedRows === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'Page not found'
+            });
+        }
+
+        res.json({
+            success: true,
+            message: 'Page deleted successfully'
+        });
+
+    } catch (error) {
+        console.error('Delete static page error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to delete page',
+            error: error.message
+        });
+    }
+};
+
+// List all static pages (Admin)
+const listStaticPages = async (req, res) => {
+    try {
+        const pages = await query('SELECT slug, title, updated_at FROM pages ORDER BY title');
+        res.json({
+            success: true,
+            data: pages
+        });
+    } catch (error) {
+        console.error('List static pages error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to list pages',
+            error: error.message
+        });
+    }
+};
+
 module.exports = {
   getPageLayout,
   getHomepageData,
   getNewsByPosition,
   getSectionNews,
   getDistrictNews,
+  getStaticPage,
+  updateStaticPage,
+  deleteStaticPage,
+  listStaticPages
 };

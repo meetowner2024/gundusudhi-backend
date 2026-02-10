@@ -7,7 +7,7 @@ const { exec } = require('child_process');
 const util = require('util');
 const execAsync = util.promisify(exec);
 
-// Helper function to handle cross-platform PDF optimization
+
 const convertPdf = async (pdfPath, outputDir, outputPrefix) => {
     if (os.platform() === 'win32' || os.platform() === 'darwin') {
         const pdf = require('pdf-poppler');
@@ -19,8 +19,6 @@ const convertPdf = async (pdfPath, outputDir, outputPrefix) => {
         };
         return pdf.convert(pdfPath, opts);
     } else {
-        // Linux: Use system installed poppler-utils
-        // Command: pdftoppm -png <input> <output_prefix_path>
         const outputPath = path.join(outputDir, outputPrefix);
         const command = `pdftoppm -png "${pdfPath}" "${outputPath}"`;
         console.log(`Executing Linux PDF conversion: ${command}`);
