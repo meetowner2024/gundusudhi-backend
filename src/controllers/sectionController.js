@@ -236,6 +236,30 @@ const deleteSubsection = async (req, res) => {
     });
   }
 };
+const getSubsectionsBySectionId = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const subsections = await query(
+      `SELECT * FROM subsections 
+       WHERE section_id = ? AND is_active = TRUE 
+       ORDER BY display_order`,
+      [id]
+    );
+
+    res.json({
+      success: true,
+      data: subsections
+    });
+  } catch (error) {
+    console.error("Get subsections error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch subsections",
+      error: error.message
+    });
+  }
+};
+
 module.exports = {
   getAllSections,
   createSection,
@@ -244,4 +268,5 @@ module.exports = {
   createSubsection,
   updateSubsection,
   deleteSubsection,
+  getSubsectionsBySectionId,
 };

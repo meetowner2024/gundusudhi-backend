@@ -1,3 +1,5 @@
+const fs = require('fs');
+const path = require('path');
 const { query, transaction } = require('../config/database');
 
 const createArticle = async (req, res) => {
@@ -19,7 +21,8 @@ const createArticle = async (req, res) => {
             tags,
             placements,
             district_id,
-            mandal_name
+            city,
+            state
         } = req.body;
 
         if (!title || !slug || !content || !section_id) {
@@ -30,13 +33,6 @@ const createArticle = async (req, res) => {
         }
 
         const result = await transaction(async (connection) => {
-            // ... existing transaction logic ...
-            // To simplify maintenance and avoid regressions, I'm keeping the original logic structure 
-            // but rewriting it here is risky if I miss details.
-            // Ideally I should append, but write_to_file replaces EVERYTHING.
-            // I must ensure I have the ORIGINAL logic perfectly copied.
-            // From Step 176, I have the full content. I will copy-paste carefully.
-
             let resolvedDistrictId = null;
             if (district_id) {
                  const [dist] = await connection.execute('SELECT id FROM districts WHERE name = ? OR id = ? LIMIT 1', [district_id, district_id]);
@@ -46,13 +42,14 @@ const createArticle = async (req, res) => {
             let finalTags = [];
             if (Array.isArray(tags)) finalTags = [...tags];
             else if (typeof tags === 'string' && tags.trim()) finalTags = tags.split(',').map(t => t.trim());
-            if (mandal_name) finalTags.push(mandal_name);
+            // City is now a column, but we can still add it as a tag for backward compatibility or search if desired
+            if (city) finalTags.push(city);
 
             const [articleResult] = await connection.execute(
                 `INSERT INTO news_articles 
                  (title, slug, summary, content, section_id, subsection_id, author_id, 
-                  featured_image, is_premium, is_breaking, is_featured, is_trending, is_hero, district_id, status, published_at) 
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                  featured_image, is_premium, is_breaking, is_featured, is_trending, is_hero, district_id, city, state, status, published_at) 
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                 [
                     title,
                     slug,
@@ -68,6 +65,8 @@ const createArticle = async (req, res) => {
                     is_trending || false,
                     is_hero || false,
                     resolvedDistrictId,
+                    city || null,
+                    state || null,
                     status || 'DRAFT',
                     status === 'PUBLISHED' ? new Date() : null
                 ]
@@ -152,6 +151,8 @@ const getArticles = async (req, res) => {
             is_trending,
             is_hero,
             district_id,
+            city,
+            state,
             page = 1,
             limit = 20,
             search,
@@ -221,6 +222,16 @@ const getArticles = async (req, res) => {
              values.push(district_id);
         }
 
+        if (city) {
+            conditions.push('a.city = ?');
+            values.push(city);
+        }
+
+        if (state) {
+            conditions.push('a.state = ?');
+            values.push(state);
+        }
+
         if (search) {
             conditions.push('(a.title LIKE ? OR a.summary LIKE ? OR a.content LIKE ?)');
             const searchPattern = `%${search}%`;
@@ -254,7 +265,7 @@ const getArticles = async (req, res) => {
             SELECT 
                 a.id, a.title, a.slug, a.summary, a.featured_image,
                 a.is_premium, a.is_breaking, a.is_featured, a.is_trending, a.is_hero, 
-                a.district_id, a.status,
+                a.district_id, a.city, a.state, a.status,
                 a.published_at, a.views_count, a.created_at,
                 s.name as section_name, s.slug as section_slug,
                 sub.name as subsection_name, sub.slug as subsection_slug,
@@ -412,6 +423,8 @@ const updateArticle = async (req, res) => {
             tags,
             placements,
             district_id,
+            city,
+            state,
             is_trending,
             is_hero
         } = req.body;
@@ -420,11 +433,11 @@ const updateArticle = async (req, res) => {
             const updates = [];
             const values = [];
 
-            if (title !== undefined) { updates.push('title = ?'); values.push(title); }
-            if (slug !== undefined) { updates.push('slug = ?'); values.push(slug); }
+            if (title !== undefined && title !== null) { updates.push('title = ?'); values.push(title); }
+            if (slug !== undefined && slug !== null) { updates.push('slug = ?'); values.push(slug); }
             if (summary !== undefined) { updates.push('summary = ?'); values.push(summary); }
-            if (content !== undefined) { updates.push('content = ?'); values.push(content); }
-            if (section_id !== undefined) { updates.push('section_id = ?'); values.push(section_id); }
+            if (content !== undefined && content !== null) { updates.push('content = ?'); values.push(content); }
+            if (section_id !== undefined && section_id !== null) { updates.push('section_id = ?'); values.push(section_id); }
             if (subsection_id !== undefined) { updates.push('subsection_id = ?'); values.push(subsection_id); }
             if (featured_image !== undefined) { updates.push('featured_image = ?'); values.push(featured_image); }
             if (is_premium !== undefined) { updates.push('is_premium = ?'); values.push(is_premium); }
@@ -449,6 +462,16 @@ const updateArticle = async (req, res) => {
                  }
                  updates.push('district_id = ?');
                  values.push(dId);
+            }
+
+            if (city !== undefined) {
+                updates.push('city = ?');
+                values.push(city);
+            }
+
+            if (state !== undefined) {
+                updates.push('state = ?');
+                values.push(state);
             }
 
             if (updates.length > 0) {
@@ -500,12 +523,35 @@ const updateArticle = async (req, res) => {
 const deleteArticle = async (req, res) => {
     try {
         const { id } = req.params;
+
+        // Get article details first to find the image path
+        const [article] = await query('SELECT featured_image FROM news_articles WHERE id = ?', [id]);
+        
         await transaction(async (connection) => {
             await connection.execute('DELETE FROM news_article_tags WHERE news_article_id = ?', [id]);
             await connection.execute('DELETE FROM news_placements WHERE news_article_id = ?', [id]);
             await connection.execute('DELETE FROM article_views WHERE article_id = ?', [id]);
             await connection.execute('DELETE FROM news_articles WHERE id = ?', [id]);
         });
+
+        // Delete image file after successful DB deletion
+        if (article && article.featured_image) {
+            const imagePath = article.featured_image;
+            // imagePath is like /uploads/images/filename.jpg
+            // We need to resolve it relative to the project root
+            // __dirname is src/controllers. Project root is ../../
+            const fullPath = path.join(__dirname, '../../', imagePath);
+            
+            fs.unlink(fullPath, (err) => {
+                if (err) {
+                    console.error('Failed to delete image file:', fullPath, err.message);
+                    // We don't fail the response if file delete fails, as the article is already deleted from DB
+                } else {
+                    console.log('Deleted image file:', fullPath);
+                }
+            });
+        }
+
         res.json({
             success: true,
             message: 'Article deleted successfully'

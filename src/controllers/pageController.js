@@ -172,57 +172,281 @@ const getNewsByPosition = async (req, res) => {
 const getSectionNews = async (req, res) => {
   try {
     const { sectionSlug } = req.params;
-    const { limit = 6, date } = req.query;
+    const { limit = 10, date, subsection, state, city, district } = req.query;
     const dateFilter = date ? " AND DATE(na.published_at) = ?" : "";
     const dateParams = date ? [date] : [];
-    if (sectionSlug === "district" || sectionSlug === "districts") {
-      const news = await query(
-        `SELECT na.id, na.title, na.slug, na.summary, na.featured_image, na.published_at,
-                        na.is_premium, na.views_count, d.name as district_name
-                 FROM news_articles na
-                 LEFT JOIN districts d ON na.district_id = d.id
-                 WHERE na.status = 'PUBLISHED' AND na.district_id IS NOT NULL ${dateFilter}
-                 ORDER BY na.published_at DESC
-                 LIMIT ?`,
-        [...dateParams, parseInt(limit)],
-      );
-      return res.json({
-        success: true,
-        data: {
-          section: {
-            id: 0,
-            name: "District News",
-            slug: "districts",
-            icon: "map-pin",
-          },
-          articles: news,
-        },
-      });
+    
+    let whereClause = "na.status = 'PUBLISHED'";
+    let queryParams = [];
+
+    // Special handling for strict generic routes if query params are provided
+    // This allows /state-news?state=Andhra%20Pradesh or /city?name=Vizag
+    if (sectionSlug === 'state-news' && state) {
+        whereClause += " AND na.state = ?";
+        queryParams.push(state);
+    } else if (sectionSlug === 'districts' || sectionSlug === 'district') {
+        if (district) {
+             // Try to match by name if district is a string, or ID if number
+             // But usually district slug is passed. 
+             // If this is a filter query:
+             whereClause += " AND (d.name = ? OR d.slug = ?)";
+             queryParams.push(district, district);
+        } else {
+             whereClause += " AND na.district_id IS NOT NULL";
+        }
+    } else if (sectionSlug === 'cities' || sectionSlug === 'city') {
+        if (city) {
+            whereClause += " AND na.city = ?";
+            queryParams.push(city);
+        } else {
+             whereClause += " AND na.city IS NOT NULL";
+        }
+    } else {
+        // Standard Section Logic
+        const section = await query(
+          "SELECT id, name, slug, icon FROM sections WHERE slug = ? AND is_active = TRUE",
+          [sectionSlug],
+        );
+        
+        if (section.length === 0) {
+             // Fallback 1: Check if it's a District
+             // Try to match by slug or name
+             const district = await query("SELECT id, name, slug FROM districts WHERE slug = ? OR name = ?", [sectionSlug, sectionSlug.replace(/-/g, ' ')]);
+             if (district.length > 0) {
+                 const d = district[0];
+                 const news = await query(
+                    `SELECT na.id, na.title, na.slug, na.summary, na.featured_image, na.published_at,
+                            na.is_premium, na.views_count, d.name as district_name, na.city, na.state,
+                            s.name as section_name, s.slug as section_slug
+                     FROM news_articles na
+                     LEFT JOIN districts d ON na.district_id = d.id
+                     LEFT JOIN sections s ON na.section_id = s.id
+                     WHERE na.district_id = ? AND na.status = 'PUBLISHED' ${dateFilter}
+                     ORDER BY na.published_at DESC
+                     LIMIT ?`,
+                    [d.id, ...dateParams, parseInt(limit)]
+                 );
+                 
+                 return res.json({
+                    success: true,
+                    data: {
+                        section: {
+                            id: d.id,
+                            name: d.name,
+                            slug: d.slug,
+                            type: 'district',
+                            is_location: true
+                        },
+                        articles: news
+                    }
+                 });
+             }
+
+             // Fallback 2: Check for State (normalize slug to potential state name)
+             const potentialState = sectionSlug.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+             const knownStates = ["Andhra Pradesh", "Telangana"];
+             
+             // Check if it's a known state or if any article has this state
+             const stateArticlesCount = await query("SELECT COUNT(*) as count FROM news_articles WHERE state = ? AND status = 'PUBLISHED'", [potentialState]);
+             
+             if (knownStates.some(s => s.toLowerCase() === potentialState.toLowerCase()) || stateArticlesCount[0].count > 0) {
+                 const news = await query(
+                    `SELECT na.id, na.title, na.slug, na.summary, na.featured_image, na.published_at,
+                            na.is_premium, na.views_count, d.name as district_name, na.city, na.state,
+                            s.name as section_name, s.slug as section_slug
+                     FROM news_articles na
+                     LEFT JOIN districts d ON na.district_id = d.id
+                     LEFT JOIN sections s ON na.section_id = s.id
+                     WHERE na.state = ? AND na.status = 'PUBLISHED' ${dateFilter}
+                     ORDER BY na.published_at DESC
+                     LIMIT ?`,
+                    [potentialState, ...dateParams, parseInt(limit)]
+                 );
+                 return res.json({
+                    success: true,
+                    data: {
+                        section: {
+                            id: 0,
+                            name: potentialState,
+                            slug: sectionSlug,
+                            type: 'state',
+                            is_location: true
+                        },
+                        articles: news
+                    }
+                 });
+             }
+
+             // Fallback 3: Check for City (loose match)
+             const citySlug = sectionSlug.replace(/-/g, ' ');
+             const cityArticles = await query("SELECT COUNT(*) as count FROM news_articles WHERE city LIKE ? AND status = 'PUBLISHED'", [`%${citySlug}%`]);
+             
+             if (cityArticles[0].count > 0) {
+                  const news = await query(
+                    `SELECT na.id, na.title, na.slug, na.summary, na.featured_image, na.published_at,
+                            na.is_premium, na.views_count, d.name as district_name, na.city, na.state,
+                            s.name as section_name, s.slug as section_slug
+                     FROM news_articles na
+                     LEFT JOIN districts d ON na.district_id = d.id
+                     LEFT JOIN sections s ON na.section_id = s.id
+                     WHERE na.city LIKE ? AND na.status = 'PUBLISHED' ${dateFilter}
+                     ORDER BY na.published_at DESC
+                     LIMIT ?`,
+                    [`%${citySlug}%`, ...dateParams, parseInt(limit)]
+                 );
+                 return res.json({
+                    success: true,
+                    data: {
+                        section: {
+                            id: 0,
+                            name: citySlug.charAt(0).toUpperCase() + citySlug.slice(1),
+                            slug: sectionSlug,
+                            type: 'city',
+                            is_location: true
+                        },
+                        articles: news
+                    }
+                 });
+             }
+
+             // Fallback 4: Check if it matches a SUBSECTION slug
+             const subsectionMatch = await query(
+                 `SELECT sub.*, s.slug as parent_section_slug, s.name as parent_section_name 
+                  FROM subsections sub
+                  JOIN sections s ON sub.section_id = s.id
+                  WHERE sub.slug = ? AND sub.is_active = TRUE`,
+                 [sectionSlug]
+             );
+
+             if (subsectionMatch.length > 0) {
+                  const sub = subsectionMatch[0];
+                  // It is a subsection. Fetch articles for this subsection.
+                  const news = await query(
+                    `SELECT na.id, na.title, na.slug, na.summary, na.featured_image, na.published_at,
+                            na.is_premium, na.views_count, d.name as district_name, na.city, na.state,
+                            s.name as section_name, s.slug as section_slug,
+                            sub.name as subsection_name, sub.slug as subsection_slug
+                     FROM news_articles na
+                     LEFT JOIN districts d ON na.district_id = d.id
+                     LEFT JOIN sections s ON na.section_id = s.id
+                     LEFT JOIN subsections sub ON na.subsection_id = sub.id
+                     WHERE na.subsection_id = ? AND na.status = 'PUBLISHED' ${dateFilter}
+                     ORDER BY na.published_at DESC
+                     LIMIT ?`,
+                    [sub.id, ...dateParams, parseInt(limit)]
+                  );
+
+                  return res.json({
+                    success: true,
+                    data: {
+                        section: {
+                            id: sub.section_id,
+                            name: sub.name,
+                            slug: sub.slug,
+                            type: 'subsection',
+                            parent_slug: sub.parent_section_slug,
+                            description: sub.description
+                        },
+                        articles: news
+                    }
+                  });
+             }
+
+             return res.status(404).json({
+                success: false,
+                message: "Section not found",
+              });
+        }
+        
+        whereClause += " AND na.section_id = ?";
+        queryParams.push(section[0].id);
+
+        if (subsection) {
+            // Check if subsection exists
+            const sub = await query("SELECT id FROM subsections WHERE slug = ? AND section_id = ?", [subsection, section[0].id]);
+            if (sub.length > 0) {
+                whereClause += " AND na.subsection_id = ?";
+                queryParams.push(sub[0].id);
+            } else {
+                 // If subsection param is passed but not found as a subsection, 
+                 // check if it matches STATE or CITY or DISTRICT names?
+                 // This allows /state-news/andhra-pradesh where 'andhra-pradesh' is passed as subsection slug
+                 // We need to handle this cleaner.
+            }
+        }
     }
-    const section = await query(
-      "SELECT id, name, slug, icon FROM sections WHERE slug = ? AND is_active = TRUE",
-      [sectionSlug],
-    );
-    if (section.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "Section not found",
-      });
+    
+    // NEW LOGIC: Handle "smart" subsection slug usage from frontend
+    // The frontend sends /section/[subsection] -> API gets section=section, subsection=subsection(slug)
+    // If the section is 'state-news', we treat subsection slug as state name
+    if (sectionSlug === 'state-news' && subsection) {
+         // Convert slug to likely state name (Andhra Pradesh) or check roughly
+         // Simple readable format: "andhra-pradesh" -> "Andhra Pradesh"
+         // But mostly we should rely on the frontend sending the correct query param or us inferring it.
+         // Let's assume the component sends ?state=Andhra%20Pradesh OR we deduce it here.
+         // For now, let's trust the query params added below.
     }
-    let news = await query(
+    
+    // Actually, looking at the frontend, it calls useSectionNews(section, subsection).
+    // The API call is likely /api/pages/section/${section}?subsection=${subsection}
+    
+    if (subsection && sectionSlug === 'state-news') {
+        // Map slug 'andhra-pradesh' to 'Andhra Pradesh'
+        const stateName = subsection.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+        whereClause += " AND na.state = ?";
+        queryParams.push(stateName);
+    } else if (subsection && (sectionSlug === 'districts' || sectionSlug === 'district')) {
+        whereClause += " AND (d.slug = ? OR d.name = ?)";
+         queryParams.push(subsection, subsection.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')); 
+    } else if (subsection && sectionSlug !== 'state-news') {
+        // Normal subsection logic if not already handled above
+         const sub = await query("SELECT id FROM subsections WHERE slug = ?", [subsection]);
+         if (sub.length > 0) {
+              whereClause += " AND na.subsection_id = ?";
+              queryParams.push(sub[0].id);
+         }
+    }
+    
+    // Final generic appends
+    // If state/city/district passed explicitly as query params (e.g. from filter menu)
+    if (state && !whereClause.includes('na.state')) {
+        whereClause += " AND na.state = ?";
+        queryParams.push(state);
+    }
+    if (city && !whereClause.includes('na.city')) {
+         whereClause += " AND na.city = ?";
+         queryParams.push(city);
+    }
+
+    const news = await query(
       `SELECT na.id, na.title, na.slug, na.summary, na.featured_image, na.published_at,
-                    na.is_premium, na.views_count
+                    na.is_premium, na.views_count, d.name as district_name, na.city, na.state,
+                    s.name as section_name, s.slug as section_slug
              FROM news_articles na
-             WHERE na.section_id = ? AND na.status = 'PUBLISHED'
-             ${dateFilter}
+             LEFT JOIN districts d ON na.district_id = d.id
+             LEFT JOIN sections s ON na.section_id = s.id
+             WHERE ${whereClause} ${dateFilter}
              ORDER BY na.published_at DESC
              LIMIT ?`,
-      [section[0].id, ...dateParams, parseInt(limit)],
+      [...queryParams, ...dateParams, parseInt(limit)],
     );
+
+    // Get Section details for metadata
+    let sectionDetails = {
+        id: 0,
+        name: sectionSlug.charAt(0).toUpperCase() + sectionSlug.slice(1),
+        slug: sectionSlug
+    };
+    
+    if (sectionSlug !== 'state-news' && sectionSlug !== 'districts' && sectionSlug !== 'city') {
+        const s = await query("SELECT id, name, slug, icon FROM sections WHERE slug = ?", [sectionSlug]);
+        if (s.length > 0) sectionDetails = s[0];
+    }
+
     res.json({
       success: true,
       data: {
-        section: section[0],
+        section: sectionDetails,
         articles: news,
       },
     });

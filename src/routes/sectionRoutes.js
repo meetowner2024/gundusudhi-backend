@@ -9,4 +9,5 @@ router.delete('/:id', authenticateToken, authorizeRoles('ADMIN'), sectionControl
 router.post('/subsections', authenticateToken, authorizeRoles('ADMIN', 'EDITOR'), sectionController.createSubsection);
 router.put('/subsections/:id', authenticateToken, authorizeRoles('ADMIN', 'EDITOR'), sectionController.updateSubsection);
 router.delete('/subsections/:id', authenticateToken, authorizeRoles('ADMIN'), sectionController.deleteSubsection);
+router.get('/:id/subsections', sectionController.getSubsectionsBySectionId);
 module.exports = router;
