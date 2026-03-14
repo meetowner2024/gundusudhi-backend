@@ -449,6 +449,38 @@ const getPaymentStats = async (req, res) => {
         res.status(500).json({ success: false, message: 'Failed to fetch payment stats' });
     }
 };
+// Cancel/Delete a user's subscription
+const adminCancelSubscription = async (req, res) => {
+    try {
+        const { userId } = req.params;
+
+        // Reset user subscription to FREE
+        await query(
+            `UPDATE users 
+             SET subscription_type = 'FREE', 
+                 subscription_start_date = NULL, 
+                 subscription_end_date = NULL 
+             WHERE id = ?`,
+            [userId]
+        );
+
+        // Cancel all active magazine_subscriptions for this user
+        await query(
+            `UPDATE magazine_subscriptions 
+             SET status = 'CANCELLED', updated_at = NOW() 
+             WHERE user_id = ? AND status = 'ACTIVE'`,
+            [userId]
+        );
+
+        res.json({
+            success: true,
+            message: 'Subscription cancelled successfully. User reverted to FREE plan.'
+        });
+    } catch (error) {
+        console.error('Cancel subscription error:', error);
+        res.status(500).json({ success: false, message: 'Failed to cancel subscription' });
+    }
+};
 
 module.exports = {
     getPlans,
@@ -462,5 +494,6 @@ module.exports = {
     adminDeletePlan,
     getSubscribers,
     adminUpdateSubscription,
+    adminCancelSubscription,
     getPaymentStats
 };
