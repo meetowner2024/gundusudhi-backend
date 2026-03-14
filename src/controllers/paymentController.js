@@ -1,6 +1,6 @@
 const Razorpay = require('razorpay');
 const crypto = require('crypto');
-const { query } = require('../config/database');
+const { query, transaction } = require('../config/database');
 
 // Initialize Razorpay
 const razorpay = new Razorpay({
@@ -8,10 +8,12 @@ const razorpay = new Razorpay({
     key_secret: process.env.TEST_PAYMENT_GATEWAY_SECRET || 'YOUR_RAZORPAY_SECRET'
 });
 
+// ==================== PUBLIC / USER ROUTES ====================
+
 // Fetch all available subscription plans
 const getPlans = async (req, res) => {
     try {
-        const plans = await query('SELECT * FROM subscription_plans WHERE is_active = TRUE');
+        const plans = await query('SELECT * FROM subscription_plans WHERE is_active = TRUE ORDER BY price ASC');
         res.json({ success: true, data: plans });
     } catch (error) {
         console.error('Error fetching plans:', error);
@@ -23,20 +25,18 @@ const getPlans = async (req, res) => {
 const createOrder = async (req, res) => {
     try {
         const { planId } = req.body;
-        const userId = req.user.id; // From authMiddleware
+        const userId = req.user.id;
 
-        // Check if plan exists
         const plans = await query('SELECT * FROM subscription_plans WHERE id = ?', [planId]);
         if (plans.length === 0) {
             return res.status(404).json({ success: false, message: 'Plan not found' });
         }
         const plan = plans[0];
 
-        // Create Order on Razorpay
         const options = {
             amount: plan.price * 100, // Amount in paise
             currency: 'INR',
-            receipt: `receipt_user_${userId}_plan_${planId}`,
+            receipt: `receipt_user_${userId}_plan_${planId}_${Date.now()}`,
             notes: {
                 userId,
                 planId: plan.id,
@@ -46,7 +46,6 @@ const createOrder = async (req, res) => {
 
         const order = await razorpay.orders.create(options);
 
-        // Save order in our database
         await query(
             `INSERT INTO payments (user_id, plan_id, razorpay_order_id, amount, currency, status)
              VALUES (?, ?, ?, ?, ?, 'CREATED')`,
@@ -68,6 +67,42 @@ const createOrder = async (req, res) => {
     }
 };
 
+// Helper: Activate subscription after successful payment
+const activateSubscription = async (userId, planId, razorpayOrderId) => {
+    const plans = await query('SELECT * FROM subscription_plans WHERE id = ?', [planId]);
+    if (plans.length === 0) return;
+    const plan = plans[0];
+
+    const [user] = await query('SELECT subscription_end_date FROM users WHERE id = ?', [userId]);
+
+    let startDate = new Date();
+    if (user && user.subscription_end_date && new Date(user.subscription_end_date) > new Date()) {
+        startDate = new Date(user.subscription_end_date);
+    }
+
+    const endDate = new Date(startDate);
+    endDate.setMonth(endDate.getMonth() + plan.duration_months);
+
+    // Update user subscription
+    await query(
+        `UPDATE users 
+         SET subscription_type = ?, 
+             subscription_start_date = IFNULL(subscription_start_date, NOW()), 
+             subscription_end_date = ? 
+         WHERE id = ?`,
+        [plan.type, endDate, userId]
+    );
+
+    // Create magazine_subscriptions record
+    await query(
+        `INSERT INTO magazine_subscriptions (user_id, plan_id, payment_id, start_date, end_date, status)
+         SELECT ?, ?, p.id, NOW(), ?, 'ACTIVE'
+         FROM payments p WHERE p.razorpay_order_id = ?
+         ON DUPLICATE KEY UPDATE status = 'ACTIVE', end_date = VALUES(end_date)`,
+        [userId, planId, endDate, razorpayOrderId]
+    );
+};
+
 // Verify Payment Signature and Complete Order
 const verifyPayment = async (req, res) => {
     try {
@@ -86,6 +121,12 @@ const verifyPayment = async (req, res) => {
             return res.status(400).json({ success: false, message: 'Invalid payment signature' });
         }
 
+        // Idempotency check
+        const existingPayment = await query('SELECT status FROM payments WHERE razorpay_order_id = ?', [razorpay_order_id]);
+        if (existingPayment.length > 0 && existingPayment[0].status === 'SUCCESS') {
+            return res.json({ success: true, message: 'Payment already verified.' });
+        }
+
         // Signature is valid. Update payment status
         await query(
             `UPDATE payments 
@@ -97,42 +138,7 @@ const verifyPayment = async (req, res) => {
         // Get payment details to grant subscription
         const payments = await query('SELECT user_id, plan_id FROM payments WHERE razorpay_order_id = ?', [razorpay_order_id]);
         if (payments.length > 0) {
-            const { user_id, plan_id } = payments[0];
-            const plans = await query('SELECT type, duration_months FROM subscription_plans WHERE id = ?', [plan_id]);
-            
-            if (plans.length > 0) {
-                const plan = plans[0];
-                
-                // Calculate new end date
-                // If user already has an active subscription, we might append or replace based on logic
-                // For simplicity, we override from now
-                const [user] = await query('SELECT subscription_end_date FROM users WHERE id = ?', [user_id]);
-                
-                let startDate = new Date();
-                let isExtending = false;
-                
-                // If the user already has a valid active subscription end date, extend it instead
-                if (user && user.subscription_end_date && new Date(user.subscription_end_date) > new Date()) {
-                    startDate = new Date(user.subscription_end_date);
-                    isExtending = true;
-                }
-                
-                // Add months
-                const endDate = new Date(startDate.setMonth(startDate.getMonth() + plan.duration_months));
-
-                const typeToUpdate = plan.type; // ONLINE, BOTH
-                const startStr = isExtending ? '(Retained original)' : "NOW()";
-
-                // Update user subscription
-                await query(
-                    `UPDATE users 
-                     SET subscription_type = ?, 
-                         subscription_start_date = IFNULL(subscription_start_date, NOW()), 
-                         subscription_end_date = ? 
-                     WHERE id = ?`,
-                    [typeToUpdate, endDate, user_id]
-                );
-            }
+            await activateSubscription(payments[0].user_id, payments[0].plan_id, razorpay_order_id);
         }
 
         res.json({ success: true, message: 'Payment verified and subscription activated.' });
@@ -142,7 +148,7 @@ const verifyPayment = async (req, res) => {
     }
 };
 
-// Webhook for fault tolerance (in case client disconnected before /verify)
+// Webhook for fault tolerance
 const razorpayWebhook = async (req, res) => {
     try {
         const secret = process.env.TEST_RAZORPAY_WEBHOOK_SECRET;
@@ -157,7 +163,7 @@ const razorpayWebhook = async (req, res) => {
             // Idempotency: skip if already handled
             const existing = await query('SELECT status FROM payments WHERE razorpay_order_id = ?', [payload.order_id]);
             if (existing.length > 0 && existing[0].status === 'SUCCESS') {
-                return res.json({ status: 'ok' }); // Already processed
+                return res.json({ status: 'ok' });
             }
 
             if (event === 'payment.captured' || event === 'payment.authorized') {
@@ -171,26 +177,9 @@ const razorpayWebhook = async (req, res) => {
                     [paymentId, orderId]
                 );
 
-                // Fetch userId and Plan to update user
                 const payments = await query('SELECT user_id, plan_id FROM payments WHERE razorpay_order_id = ?', [orderId]);
                 if (payments.length > 0) {
-                    const { user_id, plan_id } = payments[0];
-                    const plans = await query('SELECT type, duration_months FROM subscription_plans WHERE id = ?', [plan_id]);
-                    if (plans.length > 0) {
-                        const plan = plans[0];
-                        
-                        const [user] = await query('SELECT subscription_end_date FROM users WHERE id = ?', [user_id]);
-                        let startDate = new Date();
-                        if (user && user.subscription_end_date && new Date(user.subscription_end_date) > new Date()) {
-                            startDate = new Date(user.subscription_end_date);
-                        }
-                        const endDate = new Date(startDate.setMonth(startDate.getMonth() + plan.duration_months));
-
-                        await query(
-                            `UPDATE users SET subscription_type = ?, subscription_start_date = IFNULL(subscription_start_date, NOW()), subscription_end_date = ? WHERE id = ?`,
-                            [plan.type, endDate, user_id]
-                        );
-                    }
+                    await activateSubscription(payments[0].user_id, payments[0].plan_id, orderId);
                 }
             } else if (event === 'payment.failed') {
                 await query('UPDATE payments SET status = "FAILED" WHERE razorpay_order_id = ?', [payload.order_id]);
@@ -206,22 +195,30 @@ const razorpayWebhook = async (req, res) => {
     }
 };
 
-// Admin: Get all payments history
+// ==================== ADMIN ROUTES ====================
+
+// Admin: Get all payments history with filters
 const getPaymentsHistory = async (req, res) => {
     try {
-        const { page = 1, limit = 20, status } = req.query;
+        const { page = 1, limit = 20, status, search } = req.query;
         const offset = (page - 1) * limit;
 
-        let whereClause = "";
+        let whereClause = "WHERE 1=1";
         let queryParams = [];
 
         if (status) {
-            whereClause = "WHERE p.status = ?";
+            whereClause += " AND p.status = ?";
             queryParams.push(status);
         }
 
+        if (search) {
+            whereClause += " AND (u.name LIKE ? OR u.email LIKE ? OR p.razorpay_order_id LIKE ?)";
+            queryParams.push(`%${search}%`, `%${search}%`, `%${search}%`);
+        }
+
         const payments = await query(
-            `SELECT p.*, u.name as user_name, u.email as user_email, sp.name as plan_name
+            `SELECT p.*, u.name as user_name, u.email as user_email, sp.name as plan_name, sp.type as plan_type,
+                    u.subscription_type, u.subscription_end_date
              FROM payments p
              JOIN users u ON p.user_id = u.id
              JOIN subscription_plans sp ON p.plan_id = sp.id
@@ -231,7 +228,7 @@ const getPaymentsHistory = async (req, res) => {
             [...queryParams, parseInt(limit), parseInt(offset)]
         );
 
-        const [countRes] = await query(`SELECT COUNT(*) as total FROM payments p ${whereClause}`, queryParams);
+        const [countRes] = await query(`SELECT COUNT(*) as total FROM payments p JOIN users u ON p.user_id = u.id ${whereClause}`, queryParams);
 
         res.json({
             success: true,
@@ -250,10 +247,220 @@ const getPaymentsHistory = async (req, res) => {
     }
 };
 
+// Admin: Get all subscription plans (including inactive)
+const adminGetPlans = async (req, res) => {
+    try {
+        const plans = await query('SELECT * FROM subscription_plans ORDER BY price ASC');
+        res.json({ success: true, data: plans });
+    } catch (error) {
+        console.error('Admin get plans error:', error);
+        res.status(500).json({ success: false, message: 'Failed to fetch plans' });
+    }
+};
+
+// Admin: Create a new plan
+const adminCreatePlan = async (req, res) => {
+    try {
+        const { name, type, price, duration_months, features, is_active } = req.body;
+        if (!name || !type || price === undefined || !duration_months) {
+            return res.status(400).json({ success: false, message: 'name, type, price, duration_months are required' });
+        }
+        const featuresJson = features ? (typeof features === 'string' ? features : JSON.stringify(features)) : null;
+        const result = await query(
+            `INSERT INTO subscription_plans (name, type, price, duration_months, features, is_active)
+             VALUES (?, ?, ?, ?, ?, ?)`,
+            [name, type, price, duration_months, featuresJson, is_active !== false]
+        );
+        res.json({ success: true, message: 'Plan created', data: { id: result.insertId } });
+    } catch (error) {
+        console.error('Create plan error:', error);
+        res.status(500).json({ success: false, message: 'Failed to create plan' });
+    }
+};
+
+// Admin: Update a plan
+const adminUpdatePlan = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { name, type, price, duration_months, features, is_active } = req.body;
+        const featuresJson = features ? (typeof features === 'string' ? features : JSON.stringify(features)) : null;
+        await query(
+            `UPDATE subscription_plans 
+             SET name = COALESCE(?, name), 
+                 type = COALESCE(?, type), 
+                 price = COALESCE(?, price), 
+                 duration_months = COALESCE(?, duration_months),
+                 features = COALESCE(?, features),
+                 is_active = COALESCE(?, is_active)
+             WHERE id = ?`,
+            [name, type, price, duration_months, featuresJson, is_active, id]
+        );
+        res.json({ success: true, message: 'Plan updated' });
+    } catch (error) {
+        console.error('Update plan error:', error);
+        res.status(500).json({ success: false, message: 'Failed to update plan' });
+    }
+};
+
+// Admin: Delete a plan (soft delete by deactivating)
+const adminDeletePlan = async (req, res) => {
+    try {
+        const { id } = req.params;
+        await query('UPDATE subscription_plans SET is_active = FALSE WHERE id = ?', [id]);
+        res.json({ success: true, message: 'Plan deactivated' });
+    } catch (error) {
+        console.error('Delete plan error:', error);
+        res.status(500).json({ success: false, message: 'Failed to delete plan' });
+    }
+};
+
+// Admin: Get all subscribers with subscription details
+const getSubscribers = async (req, res) => {
+    try {
+        const { page = 1, limit = 20, status, search } = req.query;
+        const offset = (page - 1) * limit;
+
+        let whereClause = "WHERE u.subscription_type IS NOT NULL AND u.subscription_type != 'free' AND u.subscription_type != 'FREE'";
+        let queryParams = [];
+
+        if (status === 'active') {
+            whereClause += " AND u.subscription_end_date > NOW()";
+        } else if (status === 'expired') {
+            whereClause += " AND u.subscription_end_date <= NOW()";
+        } else if (status === 'expiring_soon') {
+            whereClause += " AND u.subscription_end_date > NOW() AND u.subscription_end_date <= DATE_ADD(NOW(), INTERVAL 7 DAY)";
+        } else if (status === 'suspended') {
+            whereClause += " AND u.is_active = FALSE";
+        }
+
+        if (search) {
+            whereClause += " AND (u.name LIKE ? OR u.email LIKE ?)";
+            queryParams.push(`%${search}%`, `%${search}%`);
+        }
+
+        const subscribers = await query(
+            `SELECT u.id, u.name, u.email, u.mobile, u.role, u.subscription_type, 
+                    u.subscription_start_date, u.subscription_end_date, u.is_active, u.created_at,
+                    DATEDIFF(u.subscription_end_date, NOW()) as days_remaining,
+                    (SELECT COUNT(*) FROM payments p WHERE p.user_id = u.id AND p.status = 'SUCCESS') as total_payments,
+                    (SELECT SUM(p.amount) FROM payments p WHERE p.user_id = u.id AND p.status = 'SUCCESS') as total_spent
+             FROM users u
+             ${whereClause}
+             ORDER BY u.subscription_end_date DESC
+             LIMIT ? OFFSET ?`,
+            [...queryParams, parseInt(limit), parseInt(offset)]
+        );
+
+        const [countRes] = await query(
+            `SELECT COUNT(*) as total FROM users u ${whereClause}`,
+            queryParams
+        );
+
+        // Get summary stats
+        const [activeCount] = await query(
+            "SELECT COUNT(*) as count FROM users WHERE subscription_type IS NOT NULL AND subscription_type != 'free' AND subscription_type != 'FREE' AND subscription_end_date > NOW()"
+        );
+        const [expiredCount] = await query(
+            "SELECT COUNT(*) as count FROM users WHERE subscription_type IS NOT NULL AND subscription_type != 'free' AND subscription_type != 'FREE' AND subscription_end_date <= NOW()"
+        );
+        const [expiringSoonCount] = await query(
+            "SELECT COUNT(*) as count FROM users WHERE subscription_type IS NOT NULL AND subscription_type != 'free' AND subscription_type != 'FREE' AND subscription_end_date > NOW() AND subscription_end_date <= DATE_ADD(NOW(), INTERVAL 7 DAY)"
+        );
+
+        res.json({
+            success: true,
+            data: {
+                subscribers,
+                stats: {
+                    active: activeCount.count,
+                    expired: expiredCount.count,
+                    expiring_soon: expiringSoonCount.count
+                },
+                pagination: {
+                    total: countRes.total,
+                    page: parseInt(page),
+                    limit: parseInt(limit)
+                }
+            }
+        });
+    } catch (error) {
+        console.error('Get subscribers error:', error);
+        res.status(500).json({ success: false, message: 'Failed to fetch subscribers' });
+    }
+};
+
+// Admin: Update user subscription manually
+const adminUpdateSubscription = async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const { subscription_type, subscription_end_date, is_active } = req.body;
+
+        let setClauses = [];
+        let params = [];
+
+        if (subscription_type !== undefined) {
+            setClauses.push('subscription_type = ?');
+            params.push(subscription_type);
+        }
+        if (subscription_end_date !== undefined) {
+            setClauses.push('subscription_end_date = ?');
+            params.push(subscription_end_date);
+        }
+        if (is_active !== undefined) {
+            setClauses.push('is_active = ?');
+            params.push(is_active);
+        }
+
+        if (setClauses.length === 0) {
+            return res.status(400).json({ success: false, message: 'No fields to update' });
+        }
+
+        params.push(userId);
+        await query(`UPDATE users SET ${setClauses.join(', ')} WHERE id = ?`, params);
+
+        res.json({ success: true, message: 'Subscription updated' });
+    } catch (error) {
+        console.error('Update subscription error:', error);
+        res.status(500).json({ success: false, message: 'Failed to update subscription' });
+    }
+};
+
+// Admin: Get payment stats for dashboard
+const getPaymentStats = async (req, res) => {
+    try {
+        const [totalRevenue] = await query("SELECT COALESCE(SUM(amount), 0) as total FROM payments WHERE status = 'SUCCESS'");
+        const [monthRevenue] = await query("SELECT COALESCE(SUM(amount), 0) as total FROM payments WHERE status = 'SUCCESS' AND created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)");
+        const [totalPayments] = await query("SELECT COUNT(*) as count FROM payments");
+        const [successPayments] = await query("SELECT COUNT(*) as count FROM payments WHERE status = 'SUCCESS'");
+        const [failedPayments] = await query("SELECT COUNT(*) as count FROM payments WHERE status = 'FAILED'");
+
+        res.json({
+            success: true,
+            data: {
+                totalRevenue: totalRevenue.total,
+                monthRevenue: monthRevenue.total,
+                totalPayments: totalPayments.count,
+                successPayments: successPayments.count,
+                failedPayments: failedPayments.count
+            }
+        });
+    } catch (error) {
+        console.error('Payment stats error:', error);
+        res.status(500).json({ success: false, message: 'Failed to fetch payment stats' });
+    }
+};
+
 module.exports = {
     getPlans,
     createOrder,
     verifyPayment,
     razorpayWebhook,
-    getPaymentsHistory
+    getPaymentsHistory,
+    adminGetPlans,
+    adminCreatePlan,
+    adminUpdatePlan,
+    adminDeletePlan,
+    getSubscribers,
+    adminUpdateSubscription,
+    getPaymentStats
 };

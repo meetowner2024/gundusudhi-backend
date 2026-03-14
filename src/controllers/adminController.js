@@ -119,7 +119,7 @@ const getAllUsers = async (req, res) => {
 const updateUser = async (req, res) => {
     try {
         const { id } = req.params;
-        const { role, subscription_type, is_active } = req.body;
+        const { role, subscription_type, is_active, subscription_end_date } = req.body;
         const updates = [];
         const values = [];
         if (role !== undefined) {
@@ -129,6 +129,10 @@ const updateUser = async (req, res) => {
         if (subscription_type !== undefined) {
             updates.push('subscription_type = ?');
             values.push(subscription_type);
+        }
+        if (subscription_end_date !== undefined) {
+            updates.push('subscription_end_date = ?');
+            values.push(subscription_end_date);
         }
         if (is_active !== undefined) {
             updates.push('is_active = ?');
