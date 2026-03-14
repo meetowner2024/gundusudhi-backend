@@ -95,11 +95,9 @@ const activateSubscription = async (userId, planId, razorpayOrderId) => {
 
     // Create magazine_subscriptions record
     await query(
-        `INSERT INTO magazine_subscriptions (user_id, plan_id, payment_id, start_date, end_date, status)
-         SELECT ?, ?, p.id, NOW(), ?, 'ACTIVE'
-         FROM payments p WHERE p.razorpay_order_id = ?
-         ON DUPLICATE KEY UPDATE status = 'ACTIVE', end_date = VALUES(end_date)`,
-        [userId, planId, endDate, razorpayOrderId]
+        `INSERT INTO magazine_subscriptions (user_id, subscription_type, price_paid, duration_months, start_date, end_date, is_active, payment_id)
+         VALUES (?, ?, ?, ?, NOW(), ?, 1, ?)`,
+        [userId, plan.type, plan.price, plan.duration_months, endDate, razorpayOrderId]
     );
 };
 
@@ -467,8 +465,8 @@ const adminCancelSubscription = async (req, res) => {
         // Cancel all active magazine_subscriptions for this user
         await query(
             `UPDATE magazine_subscriptions 
-             SET status = 'CANCELLED', updated_at = NOW() 
-             WHERE user_id = ? AND status = 'ACTIVE'`,
+             SET is_active = 0 
+             WHERE user_id = ? AND is_active = 1`,
             [userId]
         );
 
