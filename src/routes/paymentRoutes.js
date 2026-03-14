@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { authenticate, authorize } = require('../middleware/authMiddleware');
+const { authenticateToken: authenticate, authorizeRoles: authorize } = require('../middleware/auth');
 
 const {
     getPlans,
