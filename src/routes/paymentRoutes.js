@@ -15,6 +15,7 @@ const {
     getSubscribers,
     adminUpdateSubscription,
     adminCancelSubscription,
+    getUserSubscriptionHistory,
     getPaymentStats
 } = require('../controllers/paymentController');
 
@@ -32,6 +33,7 @@ router.get('/stats', authenticate, authorize('ADMIN', 'EDITOR'), getPaymentStats
 router.get('/subscribers', authenticate, authorize('ADMIN', 'EDITOR'), getSubscribers);
 router.put('/subscribers/:userId', authenticate, authorize('ADMIN'), adminUpdateSubscription);
 router.delete('/subscribers/:userId', authenticate, authorize('ADMIN'), adminCancelSubscription);
+router.get('/subscribers/:userId/history', authenticate, authorize('ADMIN', 'EDITOR'), getUserSubscriptionHistory);
 
 // Admin: Subscription Plans CRUD
 router.get('/admin/plans', authenticate, authorize('ADMIN', 'EDITOR'), adminGetPlans);

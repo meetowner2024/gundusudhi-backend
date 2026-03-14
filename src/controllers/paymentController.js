@@ -480,6 +480,56 @@ const adminCancelSubscription = async (req, res) => {
     }
 };
 
+// Get subscription history for a specific user
+const getUserSubscriptionHistory = async (req, res) => {
+    try {
+        const { userId } = req.params;
+
+        // Get user info
+        const [userInfo] = await query(
+            `SELECT id, name, email, subscription_type, subscription_start_date, subscription_end_date, is_active, created_at
+             FROM users WHERE id = ?`,
+            [userId]
+        );
+
+        if (!userInfo) {
+            return res.status(404).json({ success: false, message: 'User not found' });
+        }
+
+        // Get all payments for this user
+        const payments = await query(
+            `SELECT p.id, p.razorpay_order_id, p.razorpay_payment_id, p.amount, p.currency, p.status, p.created_at,
+                    sp.name as plan_name, sp.type as plan_type, sp.duration_months
+             FROM payments p
+             LEFT JOIN subscription_plans sp ON p.plan_id = sp.id
+             WHERE p.user_id = ?
+             ORDER BY p.created_at DESC`,
+            [userId]
+        );
+
+        // Get all magazine_subscriptions for this user
+        const subscriptions = await query(
+            `SELECT id, subscription_type, price_paid, duration_months, start_date, end_date, is_active, payment_id, created_at
+             FROM magazine_subscriptions
+             WHERE user_id = ?
+             ORDER BY created_at DESC`,
+            [userId]
+        );
+
+        res.json({
+            success: true,
+            data: {
+                user: userInfo,
+                payments,
+                subscriptions
+            }
+        });
+    } catch (error) {
+        console.error('User subscription history error:', error);
+        res.status(500).json({ success: false, message: 'Failed to fetch subscription history' });
+    }
+};
+
 module.exports = {
     getPlans,
     createOrder,
@@ -493,5 +543,6 @@ module.exports = {
     getSubscribers,
     adminUpdateSubscription,
     adminCancelSubscription,
+    getUserSubscriptionHistory,
     getPaymentStats
 };
