@@ -26,15 +26,15 @@ router.post('/verify', authenticate, verifyPayment);
 router.post('/webhook', express.raw({ type: 'application/json' }), razorpayWebhook);
 
 // Admin Routes
-router.get('/history', authenticate, authorize(['ADMIN', 'EDITOR']), getPaymentsHistory);
-router.get('/stats', authenticate, authorize(['ADMIN', 'EDITOR']), getPaymentStats);
-router.get('/subscribers', authenticate, authorize(['ADMIN', 'EDITOR']), getSubscribers);
-router.put('/subscribers/:userId', authenticate, authorize(['ADMIN']), adminUpdateSubscription);
+router.get('/history', authenticate, authorize('ADMIN', 'EDITOR'), getPaymentsHistory);
+router.get('/stats', authenticate, authorize('ADMIN', 'EDITOR'), getPaymentStats);
+router.get('/subscribers', authenticate, authorize('ADMIN', 'EDITOR'), getSubscribers);
+router.put('/subscribers/:userId', authenticate, authorize('ADMIN'), adminUpdateSubscription);
 
 // Admin: Subscription Plans CRUD
-router.get('/admin/plans', authenticate, authorize(['ADMIN', 'EDITOR']), adminGetPlans);
-router.post('/admin/plans', authenticate, authorize(['ADMIN']), adminCreatePlan);
-router.put('/admin/plans/:id', authenticate, authorize(['ADMIN']), adminUpdatePlan);
-router.delete('/admin/plans/:id', authenticate, authorize(['ADMIN']), adminDeletePlan);
+router.get('/admin/plans', authenticate, authorize('ADMIN', 'EDITOR'), adminGetPlans);
+router.post('/admin/plans', authenticate, authorize('ADMIN'), adminCreatePlan);
+router.put('/admin/plans/:id', authenticate, authorize('ADMIN'), adminUpdatePlan);
+router.delete('/admin/plans/:id', authenticate, authorize('ADMIN'), adminDeletePlan);
 
 module.exports = router;
