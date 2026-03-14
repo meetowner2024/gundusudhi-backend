@@ -21,7 +21,34 @@ const getPlans = async (req, res) => {
     }
 };
 
-// Create a Razorpay Order
+// Get the current user's active subscription details
+const getMySubscription = async (req, res) => {
+    try {
+        const userId = req.user.id;
+
+        // Get the latest active subscription from magazine_subscriptions
+        const subs = await query(
+            `SELECT ms.id, ms.subscription_type, ms.price_paid, ms.duration_months, 
+                    ms.start_date, ms.end_date, ms.is_active, ms.payment_id, ms.created_at
+             FROM magazine_subscriptions ms
+             WHERE ms.user_id = ? AND ms.is_active = 1 AND ms.end_date > NOW()
+             ORDER BY ms.created_at DESC
+             LIMIT 1`,
+            [userId]
+        );
+
+        if (subs.length === 0) {
+            return res.json({ success: true, data: null });
+        }
+
+        res.json({ success: true, data: subs[0] });
+    } catch (error) {
+        console.error('Get my subscription error:', error);
+        res.status(500).json({ success: false, message: 'Failed to fetch subscription' });
+    }
+};
+
+// Create a Razorpay Order (with deduplication)
 const createOrder = async (req, res) => {
     try {
         const { planId } = req.body;
@@ -33,8 +60,30 @@ const createOrder = async (req, res) => {
         }
         const plan = plans[0];
 
+        // Check for existing CREATED (unpaid) order for same user+plan within last 30 minutes
+        const existingOrders = await query(
+            `SELECT razorpay_order_id, amount FROM payments 
+             WHERE user_id = ? AND plan_id = ? AND status = 'CREATED' 
+             AND created_at > DATE_SUB(NOW(), INTERVAL 30 MINUTE)
+             ORDER BY created_at DESC LIMIT 1`,
+            [userId, planId]
+        );
+
+        if (existingOrders.length > 0) {
+            // Reuse existing order
+            return res.json({
+                success: true,
+                data: {
+                    orderId: existingOrders[0].razorpay_order_id,
+                    amount: plan.price * 100,
+                    currency: 'INR',
+                    keyId: process.env.TEST_PAYMENT_GATEWAY_KEY
+                }
+            });
+        }
+
         const options = {
-            amount: plan.price * 100, // Amount in paise
+            amount: plan.price * 100,
             currency: 'INR',
             receipt: `receipt_user_${userId}_plan_${planId}_${Date.now()}`,
             notes: {
@@ -532,6 +581,7 @@ const getUserSubscriptionHistory = async (req, res) => {
 
 module.exports = {
     getPlans,
+    getMySubscription,
     createOrder,
     verifyPayment,
     razorpayWebhook,

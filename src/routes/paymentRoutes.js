@@ -4,6 +4,7 @@ const { authenticateToken: authenticate, authorizeRoles: authorize } = require('
 
 const {
     getPlans,
+    getMySubscription,
     createOrder,
     verifyPayment,
     razorpayWebhook,
@@ -21,6 +22,7 @@ const {
 
 // Public/User Routes
 router.get('/plans', getPlans);
+router.get('/my-subscription', authenticate, getMySubscription);
 router.post('/create-order', authenticate, createOrder);
 router.post('/verify', authenticate, verifyPayment);
 
