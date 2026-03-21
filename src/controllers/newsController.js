@@ -86,7 +86,7 @@ const createArticle = async (req, res) => {
                     if (existingTag.length > 0) {
                         tagId = existingTag[0].id;
                     } else {
-                        const tagSlug = tagName.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
+                        const tagSlug = tagName.toLowerCase().replace(/[^\p{L}\p{N}\s-]/gu, '').replace(/\s+/g, '-').replace(/-+/g, '-').replace(/^-+|-+$/g, '');
                         const [newTag] = await connection.execute(
                             'INSERT INTO news_tags (name, slug) VALUES (?, ?)',
                             [tagName, tagSlug]
@@ -490,7 +490,7 @@ const updateArticle = async (req, res) => {
                     if (existingTag.length > 0) {
                         tagId = existingTag[0].id;
                     } else {
-                        const tagSlug = tagName.toLowerCase().replace(/\s+/g, '-');
+                        const tagSlug = tagName.toLowerCase().replace(/[^\p{L}\p{N}\s-]/gu, '').replace(/\s+/g, '-').replace(/-+/g, '-').replace(/^-+|-+$/g, '');
                         const [newTag] = await connection.execute('INSERT INTO news_tags (name, slug) VALUES (?, ?)', [tagName, tagSlug]);
                         tagId = newTag.insertId;
                     }

@@ -124,7 +124,7 @@ const uploadMagazine = async (req, res) => {
             const pdfFile = req.files.pdf_file[0];
             pdfPath = pdfFile.path;
         }
-        const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') + '-' + Date.now();
+        const slug = title.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '-').replace(/(^-|-$)/g, '') + '-' + Date.now();
         const result = await query(
             `INSERT INTO magazines 
             (title, slug, description, category, issue_date, is_premium, is_published, 
