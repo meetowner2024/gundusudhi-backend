@@ -17,14 +17,19 @@ const activeWebhookSecret = isProduction
 
 // DEBUG LOG: Verify keys being used (Masked)
 console.log(`[RAZORPAY] Initializing in ${isProduction ? 'PRODUCTION' : 'TEST/DEVELOPMENT'} mode.`);
-console.log(`[RAZORPAY] Current Key ID Prefix: ${activeKeyId ? activeKeyId.substring(0, 8) : 'NONE'}`);
-if (!activeKeyId) console.error('[RAZORPAY ERROR] Missing Key ID in .env');
+console.log(`[RAZORPAY] Current Key ID Prefix: ${activeKeyId ? activeKeyId.substring(0, 12) + '...' : 'NONE'}`);
+
+if (!activeKeyId || !activeKeySecret) {
+    console.error('[RAZORPAY ERROR] Critical Error: PAYMENT_GATEWAY_KEY or SECRET is missing from .env!');
+    // Don't throw here to avoid crashing the server on start, but will fail gracefully on request
+}
 
 // Initialize Razorpay
-const razorpay = new Razorpay({
-    key_id: activeKeyId || 'YOUR_RAZORPAY_KEY',
-    key_secret: activeKeySecret || 'YOUR_RAZORPAY_SECRET'
-});
+const razorpay = (activeKeyId && activeKeySecret) ? new Razorpay({
+    key_id: activeKeyId,
+    key_secret: activeKeySecret
+}) : null;
+
 
 // ==================== PUBLIC / USER ROUTES ====================
 
@@ -74,6 +79,10 @@ const createOrder = async (req, res) => {
 
         // Diagnostic log:
         console.log(`[RAZORPAY] CreateOrder attempt. Using Key: ${activeKeyId ? activeKeyId.substring(0, 15) + '...' : 'MISSING'}`);
+
+        if (!razorpay) {
+            return res.status(500).json({ success: false, message: 'Payment gateway configuration missing' });
+        }
 
         const plans = await query('SELECT * FROM subscription_plans WHERE id = ?', [planId]);
         if (plans.length === 0) {
