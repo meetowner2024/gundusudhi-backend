@@ -11,24 +11,12 @@ const activeKeyId = isProduction
 const activeKeySecret = isProduction 
     ? process.env.PAYMENT_GATEWAY_SECRET 
     : (process.env.TEST_PAYMENT_GATEWAY_SECRET || process.env.PAYMENT_GATEWAY_SECRET);
-const activeWebhookSecret = isProduction 
-    ? process.env.RAZORPAY_WEBHOOK_SECRET 
-    : (process.env.TEST_RAZORPAY_WEBHOOK_SECRET || process.env.RAZORPAY_WEBHOOK_SECRET);
 
-// DEBUG LOG: Verify keys being used (Masked)
-console.log(`[RAZORPAY] Initializing in ${isProduction ? 'PRODUCTION' : 'TEST/DEVELOPMENT'} mode.`);
-console.log(`[RAZORPAY] Current Key ID Prefix: ${activeKeyId ? activeKeyId.substring(0, 12) + '...' : 'NONE'}`);
-
-if (!activeKeyId || !activeKeySecret) {
-    console.error('[RAZORPAY ERROR] Critical Error: PAYMENT_GATEWAY_KEY or SECRET is missing from .env!');
-    // Don't throw here to avoid crashing the server on start, but will fail gracefully on request
-}
-
-// Initialize Razorpay
 const razorpay = (activeKeyId && activeKeySecret) ? new Razorpay({
     key_id: activeKeyId,
     key_secret: activeKeySecret
 }) : null;
+
 
 
 // ==================== PUBLIC / USER ROUTES ====================
