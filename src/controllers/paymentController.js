@@ -4,8 +4,8 @@ const { query, transaction } = require('../config/database');
 
 // Initialize Razorpay
 const razorpay = new Razorpay({
-    key_id: process.env.TEST_PAYMENT_GATEWAY_KEY || 'YOUR_RAZORPAY_KEY',
-    key_secret: process.env.TEST_PAYMENT_GATEWAY_SECRET || 'YOUR_RAZORPAY_SECRET'
+    key_id: process.env.PAYMENT_GATEWAY_KEY || 'YOUR_RAZORPAY_KEY',
+    key_secret: process.env.PAYMENT_GATEWAY_SECRET || 'YOUR_RAZORPAY_SECRET'
 });
 
 // ==================== PUBLIC / USER ROUTES ====================
@@ -83,7 +83,7 @@ const createOrder = async (req, res) => {
                     orderId: existingOrders[0].razorpay_order_id,
                     amount: plan.price * 100,
                     currency: 'INR',
-                    keyId: process.env.TEST_PAYMENT_GATEWAY_KEY
+                    keyId: process.env.PAYMENT_GATEWAY_KEY
                 }
             });
         }
@@ -121,7 +121,7 @@ const createOrder = async (req, res) => {
                 orderId: order.id,
                 amount: order.amount,
                 currency: order.currency,
-                keyId: process.env.TEST_PAYMENT_GATEWAY_KEY
+                keyId: process.env.PAYMENT_GATEWAY_KEY
             }
         });
     } catch (error) {
