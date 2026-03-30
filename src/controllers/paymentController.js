@@ -14,6 +14,11 @@ const activeWebhookSecret = isProduction
     ? process.env.RAZORPAY_WEBHOOK_SECRET 
     : (process.env.TEST_RAZORPAY_WEBHOOK_SECRET || process.env.RAZORPAY_WEBHOOK_SECRET);
 
+// DEBUG LOG: Verify keys being used (Masked)
+console.log(`[RAZORPAY] Initializing in ${isProduction ? 'PRODUCTION' : 'DEVELOPMENT/TEST'} mode.`);
+console.log(`[RAZORPAY] Mode: ${process.env.NODE_ENV || 'undefined'}`);
+console.log(`[RAZORPAY] Key ID: ${activeKeyId ? activeKeyId.substring(0, 10) + '...' : 'MISSING'}`);
+
 // Initialize Razorpay
 const razorpay = new Razorpay({
     key_id: activeKeyId || 'YOUR_RAZORPAY_KEY',

@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -5,7 +6,6 @@ const morgan = require('morgan');
 const compression = require('compression');
 const rateLimit = require('express-rate-limit');
 const path = require('path');
-require('dotenv').config();
 const { testConnection } = require('./config/database');
 const authRoutes = require('./routes/authRoutes');
 const sectionRoutes = require('./routes/sectionRoutes');
