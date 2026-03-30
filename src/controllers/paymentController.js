@@ -3,7 +3,8 @@ const crypto = require('crypto');
 const { query, transaction } = require('../config/database');
 
 // Environment-aware key selection
-const isProduction = process.env.NODE_ENV === 'production';
+// Environment-aware key selection (Forced to Test unless explicitly 'live')
+const isProduction = process.env.PAYMENT_MODE === 'live';
 const activeKeyId = isProduction 
     ? process.env.PAYMENT_GATEWAY_KEY 
     : (process.env.TEST_PAYMENT_GATEWAY_KEY || process.env.PAYMENT_GATEWAY_KEY);
@@ -15,9 +16,9 @@ const activeWebhookSecret = isProduction
     : (process.env.TEST_RAZORPAY_WEBHOOK_SECRET || process.env.RAZORPAY_WEBHOOK_SECRET);
 
 // DEBUG LOG: Verify keys being used (Masked)
-console.log(`[RAZORPAY] Initializing in ${isProduction ? 'PRODUCTION' : 'DEVELOPMENT/TEST'} mode.`);
-console.log(`[RAZORPAY] Mode: ${process.env.NODE_ENV || 'undefined'}`);
-console.log(`[RAZORPAY] Key ID: ${activeKeyId ? activeKeyId.substring(0, 10) + '...' : 'MISSING'}`);
+console.log(`[RAZORPAY] Initializing in ${isProduction ? 'PRODUCTION' : 'TEST/DEVELOPMENT'} mode.`);
+console.log(`[RAZORPAY] Current Key ID Prefix: ${activeKeyId ? activeKeyId.substring(0, 8) : 'NONE'}`);
+if (!activeKeyId) console.error('[RAZORPAY ERROR] Missing Key ID in .env');
 
 // Initialize Razorpay
 const razorpay = new Razorpay({
