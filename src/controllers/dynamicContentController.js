@@ -89,6 +89,11 @@ const saveYoutubeVideo = async (req, res) => {
         }
 
         const thumbnail = thumbnail_url || `https://img.youtube.com/vi/${youtube_id}/0.jpg`;
+        
+        if (is_daily_video) {
+            await query(`UPDATE youtube_videos SET is_daily_video = FALSE WHERE is_daily_video = TRUE`);
+        }
+
         if (id) {
             await query(
                 `UPDATE youtube_videos SET title = ?, youtube_id = ?, description = ?, 
@@ -401,10 +406,10 @@ const getFullHomepageData = async (req, res) => {
         const trending = await query(
             'SELECT * FROM trending_topics WHERE is_active = TRUE ORDER BY display_order ASC LIMIT 8'
         );
-        const [dailyVideo] = await query(
-            `SELECT * FROM youtube_videos WHERE is_daily_video = TRUE AND is_active = TRUE 
+        const videos = await query(
+            `SELECT * FROM youtube_videos WHERE is_active = TRUE 
              ${getDateFilter()}
-             ORDER BY published_at DESC LIMIT 1`,
+             ORDER BY is_daily_video DESC, published_at DESC LIMIT 10`,
              getDateParam()
         );
         const sidebarAds = await query(
@@ -445,7 +450,7 @@ const getFullHomepageData = async (req, res) => {
                 regionalUpdates,
                 editorial,
                 trending,
-                dailyVideo,
+                videos,
                 sidebarAds,
                 sectionNews,
                 latestNews
