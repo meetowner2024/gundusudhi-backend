@@ -71,6 +71,9 @@ const createOrder = async (req, res) => {
         const { planId } = req.body;
         const userId = req.user.id;
 
+        // Diagnostic log:
+        console.log(`[RAZORPAY] CreateOrder attempt. Using Key: ${activeKeyId ? activeKeyId.substring(0, 15) + '...' : 'MISSING'}`);
+
         const plans = await query('SELECT * FROM subscription_plans WHERE id = ?', [planId]);
         if (plans.length === 0) {
             return res.status(404).json({ success: false, message: 'Plan not found' });
