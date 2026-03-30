@@ -2,22 +2,11 @@ const Razorpay = require('razorpay');
 const crypto = require('crypto');
 const { query, transaction } = require('../config/database');
 
-// Environment-aware key selection
-// Environment-aware key selection (Forced to Test unless explicitly 'live')
-const isProduction = process.env.PAYMENT_MODE === 'live';
-const activeKeyId = isProduction 
-    ? process.env.PAYMENT_GATEWAY_KEY 
-    : (process.env.TEST_PAYMENT_GATEWAY_KEY || process.env.PAYMENT_GATEWAY_KEY);
-const activeKeySecret = isProduction 
-    ? process.env.PAYMENT_GATEWAY_SECRET 
-    : (process.env.TEST_PAYMENT_GATEWAY_SECRET || process.env.PAYMENT_GATEWAY_SECRET);
-
-const razorpay = (activeKeyId && activeKeySecret) ? new Razorpay({
-    key_id: activeKeyId,
-    key_secret: activeKeySecret
-}) : null;
-
-
+// Initialize Razorpay
+const razorpay = new Razorpay({
+    key_id: process.env.PAYMENT_GATEWAY_KEY || 'YOUR_RAZORPAY_KEY',
+    key_secret: process.env.PAYMENT_GATEWAY_SECRET || 'YOUR_RAZORPAY_SECRET'
+});
 
 // ==================== PUBLIC / USER ROUTES ====================
 
@@ -65,13 +54,6 @@ const createOrder = async (req, res) => {
         const { planId } = req.body;
         const userId = req.user.id;
 
-        // Diagnostic log:
-        console.log(`[RAZORPAY] CreateOrder attempt. Using Key: ${activeKeyId ? activeKeyId.substring(0, 15) + '...' : 'MISSING'}`);
-
-        if (!razorpay) {
-            return res.status(500).json({ success: false, message: 'Payment gateway configuration missing' });
-        }
-
         const plans = await query('SELECT * FROM subscription_plans WHERE id = ?', [planId]);
         if (plans.length === 0) {
             return res.status(404).json({ success: false, message: 'Plan not found' });
@@ -101,7 +83,7 @@ const createOrder = async (req, res) => {
                     orderId: existingOrders[0].razorpay_order_id,
                     amount: plan.price * 100,
                     currency: 'INR',
-                    keyId: activeKeyId
+                    keyId: process.env.PAYMENT_GATEWAY_KEY
                 }
             });
         }
@@ -139,7 +121,7 @@ const createOrder = async (req, res) => {
                 orderId: order.id,
                 amount: order.amount,
                 currency: order.currency,
-                keyId: activeKeyId
+                keyId: process.env.PAYMENT_GATEWAY_KEY
             }
         });
     } catch (error) {
@@ -189,7 +171,7 @@ const verifyPayment = async (req, res) => {
 
         const body = razorpay_order_id + "|" + razorpay_payment_id;
         const expectedSignature = crypto
-            .createHmac('sha256', activeKeySecret || 'YOUR_RAZORPAY_SECRET')
+            .createHmac('sha256', process.env.TEST_PAYMENT_GATEWAY_SECRET || 'YOUR_RAZORPAY_SECRET')
             .update(body.toString())
             .digest('hex');
 
@@ -235,7 +217,7 @@ const verifyPayment = async (req, res) => {
 // Webhook for fault tolerance
 const razorpayWebhook = async (req, res) => {
     try {
-        const secret = activeWebhookSecret;
+        const secret = process.env.TEST_RAZORPAY_WEBHOOK_SECRET;
         const shasum = crypto.createHmac('sha256', secret);
         shasum.update(JSON.stringify(req.body));
         const digest = shasum.digest('hex');
