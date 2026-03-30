@@ -171,7 +171,7 @@ const verifyPayment = async (req, res) => {
 
         const body = razorpay_order_id + "|" + razorpay_payment_id;
         const expectedSignature = crypto
-            .createHmac('sha256', process.env.TEST_PAYMENT_GATEWAY_SECRET || 'YOUR_RAZORPAY_SECRET')
+            .createHmac('sha256', process.env.PAYMENT_GATEWAY_SECRET || 'YOUR_RAZORPAY_SECRET')
             .update(body.toString())
             .digest('hex');
 
@@ -217,7 +217,7 @@ const verifyPayment = async (req, res) => {
 // Webhook for fault tolerance
 const razorpayWebhook = async (req, res) => {
     try {
-        const secret = process.env.TEST_RAZORPAY_WEBHOOK_SECRET;
+        const secret = process.env.RAZORPAY_WEBHOOK_SECRET;
         const shasum = crypto.createHmac('sha256', secret);
         shasum.update(JSON.stringify(req.body));
         const digest = shasum.digest('hex');
