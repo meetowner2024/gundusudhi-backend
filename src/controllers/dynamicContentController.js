@@ -345,10 +345,9 @@ const getFullHomepageData = async (req, res) => {
         const heroMain = await query(
             `SELECT na.*, s.name as section_name FROM news_articles na
              LEFT JOIN sections s ON na.section_id = s.id
-             LEFT JOIN news_placements np ON na.id = np.news_article_id AND np.position = 'hero_main'
-             WHERE na.status = 'PUBLISHED' AND (np.is_active = TRUE OR na.is_featured = TRUE)
+             WHERE na.status = 'PUBLISHED' AND na.is_hero = TRUE
              ${getDateFilter('na')}
-             ORDER BY CASE WHEN np.is_active = TRUE THEN 0 ELSE 1 END, na.published_at DESC
+             ORDER BY na.published_at DESC
              LIMIT 5`,
              getDateParam()
         );

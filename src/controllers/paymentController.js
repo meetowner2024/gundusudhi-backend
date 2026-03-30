@@ -59,6 +59,12 @@ const createOrder = async (req, res) => {
             return res.status(404).json({ success: false, message: 'Plan not found' });
         }
         const plan = plans[0];
+        const isOffline = req.body.isOffline === true;
+        const shippingDetails = req.body.shippingDetails; // {name, mobile, email, address, street, city, state, pincode}
+
+        if (isOffline) {
+             await query(`CREATE TABLE IF NOT EXISTS offline_orders (id INT AUTO_INCREMENT PRIMARY KEY, user_id INT, name VARCHAR(255), mobile VARCHAR(50), email VARCHAR(255), address TEXT, street VARCHAR(255), city VARCHAR(100), state VARCHAR(100), pincode VARCHAR(20), plan_id INT, razorpay_order_id VARCHAR(255), razorpay_payment_id VARCHAR(255), amount DECIMAL(10,2), status VARCHAR(50) DEFAULT 'CREATED', magazines_delivered INT DEFAULT 0, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP)`);
+        }
 
         // Check for existing CREATED (unpaid) order for same user+plan within last 30 minutes
         const existingOrders = await query(
@@ -100,6 +106,14 @@ const createOrder = async (req, res) => {
              VALUES (?, ?, ?, ?, ?, 'CREATED')`,
             [userId, plan.id, order.id, plan.price, 'INR']
         );
+
+        if (isOffline && shippingDetails) {
+            await query(
+               `INSERT INTO offline_orders (user_id, name, mobile, email, address, street, city, state, pincode, plan_id, razorpay_order_id, amount, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'CREATED')`,
+               [userId, shippingDetails.name, shippingDetails.mobile, shippingDetails.email, shippingDetails.address, shippingDetails.street, shippingDetails.city, shippingDetails.state, shippingDetails.pincode, plan.id, order.id, plan.price]
+            );
+        }
 
         res.json({
             success: true,
@@ -181,6 +195,11 @@ const verifyPayment = async (req, res) => {
              WHERE razorpay_order_id = ?`,
             [razorpay_payment_id, razorpay_signature, razorpay_order_id]
         );
+
+        // Update offline_orders if exists
+        try {
+            await query(`UPDATE offline_orders SET status = 'SUCCESS', razorpay_payment_id = ? WHERE razorpay_order_id = ?`, [razorpay_payment_id, razorpay_order_id]);
+        } catch(e) {}
 
         // Get payment details to grant subscription
         const payments = await query('SELECT user_id, plan_id FROM payments WHERE razorpay_order_id = ?', [razorpay_order_id]);
@@ -436,6 +455,41 @@ const getSubscribers = async (req, res) => {
     }
 };
 
+// Admin: Get offline orders
+const getOfflineOrders = async (req, res) => {
+    try {
+        const { page = 1, limit = 20 } = req.query;
+        const offset = (page - 1) * limit;
+        
+        const orders = await query(
+            `SELECT o.*, p.name as plan_name 
+             FROM offline_orders o 
+             LEFT JOIN subscription_plans p ON o.plan_id = p.id
+             ORDER BY o.created_at DESC LIMIT ? OFFSET ?`,
+            [parseInt(limit), parseInt(offset)]
+        );
+        const [countRes] = await query('SELECT COUNT(*) as total FROM offline_orders');
+        
+        res.json({ success: true, data: { orders, pagination: { total: countRes.total, page: parseInt(page), limit: parseInt(limit) } } });
+    } catch(err) {
+        res.status(500).json({ success: false, message: 'Failed to load' });
+    }
+};
+
+const updateOfflineOrder = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { magazines_delivered, status } = req.body;
+        await query(
+           `UPDATE offline_orders SET magazines_delivered = COALESCE(?, magazines_delivered), status = COALESCE(?, status) WHERE id = ?`,
+           [magazines_delivered, status, id]
+        );
+        res.json({ success: true });
+    } catch(err) {
+        res.status(500).json({ success: false });
+    }
+};
+
 // Admin: Update user subscription manually
 const adminUpdateSubscription = async (req, res) => {
     try {
@@ -579,6 +633,22 @@ const getUserSubscriptionHistory = async (req, res) => {
     }
 };
 
+const getMyOfflineOrders = async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const orders = await query(
+            `SELECT o.*, p.name as plan_name 
+             FROM offline_orders o 
+             LEFT JOIN subscription_plans p ON o.plan_id = p.id
+             WHERE o.user_id = ? ORDER BY o.created_at DESC`,
+            [userId]
+        );
+        res.json({ success: true, data: orders });
+    } catch(err) {
+         res.status(500).json({ success: false });
+    }
+};
+
 module.exports = {
     getPlans,
     getMySubscription,
@@ -594,5 +664,8 @@ module.exports = {
     adminUpdateSubscription,
     adminCancelSubscription,
     getUserSubscriptionHistory,
-    getPaymentStats
+    getPaymentStats,
+    getOfflineOrders,
+    updateOfflineOrder,
+    getMyOfflineOrders
 };

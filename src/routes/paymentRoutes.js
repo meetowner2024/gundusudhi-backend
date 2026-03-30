@@ -17,12 +17,16 @@ const {
     adminUpdateSubscription,
     adminCancelSubscription,
     getUserSubscriptionHistory,
-    getPaymentStats
+    getPaymentStats,
+    getOfflineOrders,
+    updateOfflineOrder,
+    getMyOfflineOrders
 } = require('../controllers/paymentController');
 
 // Public/User Routes
 router.get('/plans', getPlans);
 router.get('/my-subscription', authenticate, getMySubscription);
+router.get('/my-offline-orders', authenticate, getMyOfflineOrders);
 router.post('/create-order', authenticate, createOrder);
 router.post('/verify', authenticate, verifyPayment);
 
@@ -32,6 +36,8 @@ router.post('/webhook', express.raw({ type: 'application/json' }), razorpayWebho
 // Admin Routes
 router.get('/history', authenticate, authorize('ADMIN', 'EDITOR'), getPaymentsHistory);
 router.get('/stats', authenticate, authorize('ADMIN', 'EDITOR'), getPaymentStats);
+router.get('/offline-orders', authenticate, authorize('ADMIN', 'EDITOR'), getOfflineOrders);
+router.put('/offline-orders/:id', authenticate, authorize('ADMIN', 'EDITOR'), updateOfflineOrder);
 router.get('/subscribers', authenticate, authorize('ADMIN', 'EDITOR'), getSubscribers);
 router.put('/subscribers/:userId', authenticate, authorize('ADMIN'), adminUpdateSubscription);
 router.delete('/subscribers/:userId', authenticate, authorize('ADMIN'), adminCancelSubscription);
