@@ -2,10 +2,22 @@ const Razorpay = require('razorpay');
 const crypto = require('crypto');
 const { query, transaction } = require('../config/database');
 
+// Environment-aware key selection
+const isProduction = process.env.NODE_ENV === 'production';
+const activeKeyId = isProduction 
+    ? process.env.PAYMENT_GATEWAY_KEY 
+    : (process.env.TEST_PAYMENT_GATEWAY_KEY || process.env.PAYMENT_GATEWAY_KEY);
+const activeKeySecret = isProduction 
+    ? process.env.PAYMENT_GATEWAY_SECRET 
+    : (process.env.TEST_PAYMENT_GATEWAY_SECRET || process.env.PAYMENT_GATEWAY_SECRET);
+const activeWebhookSecret = isProduction 
+    ? process.env.RAZORPAY_WEBHOOK_SECRET 
+    : (process.env.TEST_RAZORPAY_WEBHOOK_SECRET || process.env.RAZORPAY_WEBHOOK_SECRET);
+
 // Initialize Razorpay
 const razorpay = new Razorpay({
-    key_id: process.env.PAYMENT_GATEWAY_KEY || 'YOUR_RAZORPAY_KEY',
-    key_secret: process.env.PAYMENT_GATEWAY_SECRET || 'YOUR_RAZORPAY_SECRET'
+    key_id: activeKeyId || 'YOUR_RAZORPAY_KEY',
+    key_secret: activeKeySecret || 'YOUR_RAZORPAY_SECRET'
 });
 
 // ==================== PUBLIC / USER ROUTES ====================
@@ -83,7 +95,7 @@ const createOrder = async (req, res) => {
                     orderId: existingOrders[0].razorpay_order_id,
                     amount: plan.price * 100,
                     currency: 'INR',
-                    keyId: process.env.PAYMENT_GATEWAY_KEY
+                    keyId: activeKeyId
                 }
             });
         }
@@ -121,7 +133,7 @@ const createOrder = async (req, res) => {
                 orderId: order.id,
                 amount: order.amount,
                 currency: order.currency,
-                keyId: process.env.PAYMENT_GATEWAY_KEY
+                keyId: activeKeyId
             }
         });
     } catch (error) {
@@ -171,7 +183,7 @@ const verifyPayment = async (req, res) => {
 
         const body = razorpay_order_id + "|" + razorpay_payment_id;
         const expectedSignature = crypto
-            .createHmac('sha256', process.env.PAYMENT_GATEWAY_SECRET || 'YOUR_RAZORPAY_SECRET')
+            .createHmac('sha256', activeKeySecret || 'YOUR_RAZORPAY_SECRET')
             .update(body.toString())
             .digest('hex');
 
@@ -217,7 +229,7 @@ const verifyPayment = async (req, res) => {
 // Webhook for fault tolerance
 const razorpayWebhook = async (req, res) => {
     try {
-        const secret = process.env.RAZORPAY_WEBHOOK_SECRET;
+        const secret = activeWebhookSecret;
         const shasum = crypto.createHmac('sha256', secret);
         shasum.update(JSON.stringify(req.body));
         const digest = shasum.digest('hex');
