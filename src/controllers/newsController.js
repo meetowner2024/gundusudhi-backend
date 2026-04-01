@@ -32,6 +32,14 @@ const createArticle = async (req, res) => {
             });
         }
 
+        // ── Sanitize slug: reject any non-ASCII characters (e.g. Telugu) ──
+        // This prevents percent-encoded URLs like /news/%E0%B0%A4...
+        const isAsciiSlug = /^[a-z0-9-]+$/i.test(slug);
+        const safeSlug = isAsciiSlug
+            ? slug.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-+|-+$/g, '')
+            : `article-${Date.now().toString(36)}`;
+
+
         const result = await transaction(async (connection) => {
             let resolvedDistrictId = null;
             if (district_id) {
@@ -52,7 +60,7 @@ const createArticle = async (req, res) => {
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                 [
                     title,
-                    slug,
+                    safeSlug,
                     summary || null,
                     content,
                     section_id,
