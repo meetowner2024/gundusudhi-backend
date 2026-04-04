@@ -18,6 +18,7 @@ const dynamicContentRoutes = require('./routes/dynamicContentRoutes');
 const magazineRoutes = require('./routes/magazineRoutes');
 const adsRoutes = require('./routes/adsRoutes');
 const paymentRoutes = require('./routes/paymentRoutes');
+const legalRoutes = require('./routes/legalRoutes');
 const app = express();
 const PORT = process.env.PORT || 5000;
 app.use(helmet({
@@ -56,6 +57,7 @@ app.use('/api/v1/content', dynamicContentRoutes);
 app.use('/api/v1/magazines', magazineRoutes);
 app.use('/api/v1/ads', adsRoutes);
 app.use('/api/v1/payments', paymentRoutes);
+app.use('/api/v1/legal', legalRoutes);
 app.use((req, res) => {
     res.status(404).json({
         success: false,
