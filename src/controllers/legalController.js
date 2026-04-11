@@ -1,6 +1,6 @@
 const { query } = require('../config/database');
 
-const ALLOWED_LEGAL_SLUGS = ['terms', 'privacy-policy'];
+const ALLOWED_LEGAL_SLUGS = ['terms', 'privacy-policy', 'about'];
 
 // GET /legal/:slug  — Public: anyone can read
 const getLegalPage = async (req, res) => {
