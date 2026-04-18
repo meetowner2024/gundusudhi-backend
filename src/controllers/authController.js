@@ -2,6 +2,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const { query, transaction } = require('../config/database');
+const { validatePasscode } = require('./passcodeController');
 
 const generateToken = (userId, version, expiresIn = '1h') => {
     return jwt.sign(
@@ -386,20 +387,12 @@ const createAdmin = async (req, res) => {
 const changePassword = async (req, res) => {
     try {
         const userId = req.user.id;
-        const { oldPassword, newPassword, adminPassword } = req.body;
+        const { oldPassword, newPassword } = req.body;
 
-        if (!oldPassword || !newPassword || !adminPassword) {
+        if (!oldPassword || !newPassword) {
             return res.status(400).json({ 
                 success: false, 
-                message: 'Old password, new password, and admin password are required' 
-            });
-        }
-
-        // Verify Admin Password
-        if (adminPassword !== process.env.ADMIN_PASSWORD) {
-            return res.status(403).json({
-                success: false,
-                message: 'Invalid admin verification password'
+                message: 'Old password and new password are required' 
             });
         }
 
@@ -437,21 +430,22 @@ const forgotPassword = async (req, res) => {
         if (!email || !newPassword || !adminPassword) {
             return res.status(400).json({ 
                 success: false, 
-                message: 'Email, new password, and admin password are required' 
+                message: 'Email, new password, and admin code are required' 
             });
         }
 
-        // Verify Admin Password
-        if (adminPassword !== process.env.ADMIN_PASSWORD) {
+        // Validate passcode against DB
+        const isValidCode = await validatePasscode(adminPassword);
+        if (!isValidCode) {
             return res.status(403).json({
                 success: false,
-                message: 'Invalid admin verification password'
+                message: 'Invalid admin verification code. Please contact your administrator.'
             });
         }
 
         const users = await query('SELECT id FROM users WHERE email = ?', [email]);
         if (users.length === 0) {
-            return res.status(404).json({ success: false, message: 'User not found' });
+            return res.status(404).json({ success: false, message: 'No account found with this email address' });
         }
 
         const userId = users[0].id;
@@ -464,7 +458,7 @@ const forgotPassword = async (req, res) => {
 
         res.json({
             success: true,
-            message: 'Password reset successfully'
+            message: 'Password reset successfully. You can now log in with your new password.'
         });
 
     } catch (error) {
