@@ -21,6 +21,8 @@ const paymentRoutes = require('./routes/paymentRoutes');
 const legalRoutes = require('./routes/legalRoutes');
 const passcodeRoutes = require('./routes/passcodeRoutes');
 const { concurrencyLimiter, getServerStatus } = require('./middleware/concurrencyLimiter');
+require('./services/notificationService'); // Initializes notifications database table
+
 const app = express();
 const PORT = process.env.PORT || 5000;
 app.use(helmet({
@@ -86,8 +88,11 @@ app.use((err, req, res, next) => {
         ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
     });
 });
+const { startCronJobs } = require('./cron/subscriptionCron');
+
 const startServer = async () => {
     try {
+        startCronJobs();
         const dbConnected = await testConnection();
         if (!dbConnected) {
             console.error('Failed to connect to database. Exiting...');

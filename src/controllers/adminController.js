@@ -610,6 +610,38 @@ const exportUsers = async (req, res) => {
     }
 };
 
+const fs = require('fs').promises;
+const path = require('path');
+
+const getSystemLogs = async (req, res) => {
+    try {
+        const { type = 'activity' } = req.query; // activity, payments, subscriptions
+        const validTypes = ['activity', 'payments', 'subscriptions'];
+        
+        if (!validTypes.includes(type)) {
+            return res.status(400).json({ success: false, message: 'Invalid log type' });
+        }
+
+        const logPath = path.join(__dirname, '../../logs', `${type}.log`);
+        
+        try {
+            const content = await fs.readFile(logPath, 'utf8');
+            // Parse lines into array, flip to show newest first
+            const lines = content.split('\n').filter(line => line.trim() !== '').reverse();
+            res.json({ success: true, data: lines });
+        } catch (fileErr) {
+            if (fileErr.code === 'ENOENT') {
+                return res.json({ success: true, data: [], message: 'Log file is empty or does not exist yet.' });
+            }
+            throw fileErr;
+        }
+
+    } catch (error) {
+        console.error('Get system logs error:', error);
+        res.status(500).json({ success: false, message: 'Failed to fetch logs' });
+    }
+};
+
 module.exports = {
     getDashboardStats,
     getAllUsers,
@@ -620,5 +652,6 @@ module.exports = {
     getUserActivity,
     getContentAnalytics,
     getActivityLogs,
-    exportUsers
+    exportUsers,
+    getSystemLogs
 };

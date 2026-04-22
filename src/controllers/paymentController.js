@@ -1,6 +1,7 @@
 const Razorpay = require('razorpay');
 const crypto = require('crypto');
 const { query, transaction } = require('../config/database');
+const { paymentsLogger, subscriptionLogger } = require('../utils/logger');
 
 // Initialize Razorpay
 const razorpay = new Razorpay({
@@ -202,9 +203,10 @@ const verifyPayment = async (req, res) => {
         } catch(e) {}
 
         // Get payment details to grant subscription
-        const payments = await query('SELECT user_id, plan_id FROM payments WHERE razorpay_order_id = ?', [razorpay_order_id]);
+        const payments = await query('SELECT user_id, plan_id, amount FROM payments WHERE razorpay_order_id = ?', [razorpay_order_id]);
         if (payments.length > 0) {
             await activateSubscription(payments[0].user_id, payments[0].plan_id, razorpay_order_id);
+            paymentsLogger.info(`Payment verified successfully: User ${payments[0].user_id} bought Plan ${payments[0].plan_id} for ${payments[0].amount} INR (OrderID: ${razorpay_order_id})`);
         }
 
         res.json({ success: true, message: 'Payment verified and subscription activated.' });
@@ -620,6 +622,8 @@ const adminUpdateSubscription = async (req, res) => {
         params.push(userId);
         await query(`UPDATE users SET ${setClauses.join(', ')} WHERE id = ?`, params);
 
+        subscriptionLogger.info(`Admin manually updated subscription for user ${userId}. Details: ${JSON.stringify(req.body)}`);
+
         res.json({ success: true, message: 'Subscription updated' });
     } catch (error) {
         console.error('Update subscription error:', error);
@@ -673,6 +677,8 @@ const adminCancelSubscription = async (req, res) => {
              WHERE user_id = ? AND is_active = 1`,
             [userId]
         );
+
+        subscriptionLogger.info(`Admin manually cancelled subscription for user ${userId}.`);
 
         res.json({
             success: true,

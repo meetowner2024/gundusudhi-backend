@@ -6,6 +6,7 @@ const os = require('os');
 const { exec } = require('child_process');
 const util = require('util');
 const execAsync = util.promisify(exec);
+const { activityLogger } = require('../utils/logger');
 
 
 const convertPdf = async (pdfPath, outputDir, outputPrefix) => {
@@ -510,6 +511,9 @@ const startReadingSession = async (req, res) => {
              VALUES (?, 'READ', 'magazine', ?, ?)`,
             [userId, magazineId, JSON.stringify({ title: magazine.title })]
         );
+
+        activityLogger.info(`User ${userId} started reading Magazine ${magazineId} (${magazine.title})`);
+
         res.json({
             success: true,
             data: {
