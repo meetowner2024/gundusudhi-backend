@@ -455,38 +455,139 @@ const getSubscribers = async (req, res) => {
     }
 };
 
-// Admin: Get offline orders
+// Admin: Get offline orders with full filters
 const getOfflineOrders = async (req, res) => {
     try {
-        const { page = 1, limit = 20 } = req.query;
+        const { page = 1, limit = 20, status, search, payment_status, date_from, date_to } = req.query;
         const offset = (page - 1) * limit;
-        
+
+        let whereClause = 'WHERE 1=1';
+        let queryParams = [];
+
+        if (status && status !== 'ALL') {
+            whereClause += ' AND o.status = ?';
+            queryParams.push(status);
+        }
+        if (payment_status === 'PAID') {
+            whereClause += ' AND o.razorpay_payment_id IS NOT NULL AND o.razorpay_payment_id != ""';
+        } else if (payment_status === 'UNPAID') {
+            whereClause += ' AND (o.razorpay_payment_id IS NULL OR o.razorpay_payment_id = "")';
+        }
+        if (search) {
+            whereClause += ' AND (o.name LIKE ? OR o.email LIKE ? OR o.mobile LIKE ? OR o.razorpay_order_id LIKE ?)';
+            const s = `%${search}%`;
+            queryParams.push(s, s, s, s);
+        }
+        if (date_from) { whereClause += ' AND DATE(o.created_at) >= ?'; queryParams.push(date_from); }
+        if (date_to)   { whereClause += ' AND DATE(o.created_at) <= ?'; queryParams.push(date_to); }
+
         const orders = await query(
-            `SELECT o.*, p.name as plan_name 
-             FROM offline_orders o 
-             LEFT JOIN subscription_plans p ON o.plan_id = p.id
-             ORDER BY o.created_at DESC LIMIT ? OFFSET ?`,
-            [parseInt(limit), parseInt(offset)]
+            `SELECT o.*, sp.name as plan_name, sp.type as plan_type, u.name as user_name
+             FROM offline_orders o
+             LEFT JOIN subscription_plans sp ON o.plan_id = sp.id
+             LEFT JOIN users u ON o.user_id = u.id
+             ${whereClause}
+             ORDER BY o.created_at DESC
+             LIMIT ? OFFSET ?`,
+            [...queryParams, parseInt(limit), parseInt(offset)]
         );
-        const [countRes] = await query('SELECT COUNT(*) as total FROM offline_orders');
-        
-        res.json({ success: true, data: { orders, pagination: { total: countRes.total, page: parseInt(page), limit: parseInt(limit) } } });
+
+        const [countRes] = await query(
+            `SELECT COUNT(*) as total FROM offline_orders o ${whereClause}`, queryParams
+        );
+
+        const [statsRes] = await query(`
+            SELECT
+                COUNT(*) as total,
+                SUM(CASE WHEN status = 'SUCCESS' THEN 1 ELSE 0 END) as paid,
+                SUM(CASE WHEN status = 'CREATED' THEN 1 ELSE 0 END) as pending,
+                SUM(CASE WHEN status = 'FAILED' THEN 1 ELSE 0 END) as failed,
+                SUM(CASE WHEN status = 'DELIVERED' THEN 1 ELSE 0 END) as delivered,
+                SUM(CASE WHEN razorpay_payment_id IS NOT NULL AND razorpay_payment_id != '' THEN amount ELSE 0 END) as total_revenue
+            FROM offline_orders
+        `);
+
+        res.json({ success: true, data: { orders, stats: statsRes, pagination: { total: countRes.total, page: parseInt(page), limit: parseInt(limit) } } });
     } catch(err) {
-        res.status(500).json({ success: false, message: 'Failed to load' });
+        console.error('Get offline orders error:', err);
+        res.status(500).json({ success: false, message: 'Failed to load offline orders' });
     }
 };
 
+// Admin: Update offline order with delivery tracking + notes
 const updateOfflineOrder = async (req, res) => {
     try {
         const { id } = req.params;
-        const { magazines_delivered, status } = req.body;
-        await query(
-           `UPDATE offline_orders SET magazines_delivered = COALESCE(?, magazines_delivered), status = COALESCE(?, status) WHERE id = ?`,
-           [magazines_delivered, status, id]
+        const { magazines_delivered, status, admin_notes } = req.body;
+
+        const setClauses = [];
+        const params = [];
+
+        if (magazines_delivered !== undefined) { setClauses.push('magazines_delivered = ?'); params.push(parseInt(magazines_delivered)); }
+        if (status !== undefined) {
+            setClauses.push('status = ?'); params.push(status);
+            if (status === 'DELIVERED') setClauses.push('delivered_at = NOW()');
+        }
+        if (admin_notes !== undefined) { setClauses.push('admin_notes = ?'); params.push(admin_notes); }
+
+        if (setClauses.length === 0) return res.status(400).json({ success: false, message: 'Nothing to update' });
+
+        params.push(id);
+        await query(`UPDATE offline_orders SET ${setClauses.join(', ')}, updated_at = NOW() WHERE id = ?`, params);
+
+        const [updated] = await query(
+            `SELECT o.*, sp.name as plan_name FROM offline_orders o LEFT JOIN subscription_plans sp ON o.plan_id = sp.id WHERE o.id = ?`, [id]
         );
-        res.json({ success: true });
+        res.json({ success: true, message: 'Order updated', data: updated });
     } catch(err) {
-        res.status(500).json({ success: false });
+        console.error('Update offline order error:', err);
+        res.status(500).json({ success: false, message: 'Failed to update order' });
+    }
+};
+
+// Admin: Export payments/offline orders as CSV (Excel-compatible)
+const exportPayments = async (req, res) => {
+    try {
+        const { status, date_from, date_to, type = 'online' } = req.query;
+        let whereClause = 'WHERE 1=1';
+        let params = [];
+
+        if (status && status !== 'ALL') { whereClause += ' AND p.status = ?'; params.push(status); }
+        if (date_from) { whereClause += ' AND DATE(p.created_at) >= ?'; params.push(date_from); }
+        if (date_to)   { whereClause += ' AND DATE(p.created_at) <= ?'; params.push(date_to); }
+
+        let rows, headers;
+        if (type === 'offline') {
+            const ow = whereClause.replace(/p\./g, 'o.');
+            rows = await query(
+                `SELECT o.id, o.name, o.email, o.mobile, o.address, o.city, o.state, o.pincode,
+                        sp.name as plan_name, o.amount, o.razorpay_order_id, o.razorpay_payment_id,
+                        o.status, o.magazines_delivered, o.admin_notes, o.delivered_at, o.created_at
+                 FROM offline_orders o LEFT JOIN subscription_plans sp ON o.plan_id = sp.id ${ow} ORDER BY o.created_at DESC`,
+                params
+            );
+            headers = ['ID','Name','Email','Mobile','Address','City','State','Pincode','Plan','Amount','Order ID','Payment ID','Status','Mags Delivered','Notes','Delivered At','Created At'];
+        } else {
+            rows = await query(
+                `SELECT p.id, u.name, u.email, u.mobile, sp.name as plan, sp.type, p.amount, p.currency,
+                        p.status, p.razorpay_order_id, p.razorpay_payment_id,
+                        u.subscription_type, u.subscription_end_date, p.created_at
+                 FROM payments p JOIN users u ON p.user_id = u.id LEFT JOIN subscription_plans sp ON p.plan_id = sp.id
+                 ${whereClause} ORDER BY p.created_at DESC`,
+                params
+            );
+            headers = ['ID','Name','Email','Mobile','Plan','Type','Amount','Currency','Status','Order ID','Payment ID','Sub Type','Sub End','Date'];
+        }
+
+        const esc = (v) => { if (v == null) return ''; return `"${String(v).replace(/"/g, '""')}"`; };
+        const csv = [headers.map(esc).join(','), ...rows.map(r => Object.values(r).map(esc).join(','))].join('\r\n');
+        const fname = `gundusoodhi_${type}_${new Date().toISOString().split('T')[0]}.csv`;
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename="${fname}"`);
+        res.send('\uFEFF' + csv);
+    } catch (err) {
+        console.error('Export error:', err);
+        res.status(500).json({ success: false, message: 'Export failed' });
     }
 };
 
@@ -667,5 +768,6 @@ module.exports = {
     getPaymentStats,
     getOfflineOrders,
     updateOfflineOrder,
-    getMyOfflineOrders
+    getMyOfflineOrders,
+    exportPayments
 };

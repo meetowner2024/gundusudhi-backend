@@ -9,6 +9,7 @@ router.get('/dashboard/traffic', adminController.getTrafficStats);
 router.get('/dashboard/content-analytics', adminController.getContentAnalytics);
 router.get('/dashboard/analytics/detailed', adminController.getDetailedAnalytics);
 router.get('/users', adminController.getAllUsers);
+router.get('/users/export', adminController.exportUsers);
 router.get('/users/:id/activity', adminController.getUserActivity);
 router.put('/users/:id', adminController.updateUser);
 router.delete('/users/:id', adminController.deleteUser);

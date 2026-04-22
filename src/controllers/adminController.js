@@ -556,6 +556,60 @@ const getActivityLogs = async (req, res) => {
         });
     }
 };
+const exportUsers = async (req, res) => {
+    try {
+        const { role } = req.query;
+        let whereClause = '';
+        let params = [];
+        if (role) {
+            whereClause = 'WHERE role = ?';
+            params.push(role);
+        }
+
+        const users = await query(
+            `SELECT id, name, email, mobile, role, subscription_type, 
+             subscription_start_date, subscription_end_date, is_active, created_at 
+             FROM users ${whereClause} ORDER BY created_at DESC`,
+            params
+        );
+
+        const headers = [
+            'ID', 'Name', 'Email', 'Mobile', 'Role', 'Subscription Type',
+            'Subscription Start', 'Subscription End', 'Active Status', 'Join Date'
+        ];
+
+        const escape = (v) => { if (v == null) return ''; return `"${String(v).replace(/"/g, '""')}"`; };
+        const csvLines = [
+            headers.map(escape).join(',')
+        ];
+
+        users.forEach(user => {
+            csvLines.push([
+                user.id,
+                user.name,
+                user.email,
+                user.mobile,
+                user.role,
+                user.subscription_type || 'FREE',
+                user.subscription_start_date ? new Date(user.subscription_start_date).toLocaleDateString() : '',
+                user.subscription_end_date ? new Date(user.subscription_end_date).toLocaleDateString() : '',
+                user.is_active ? 'Yes' : 'No',
+                new Date(user.created_at).toLocaleDateString()
+            ].map(escape).join(','));
+        });
+
+        const csv = csvLines.join('\r\n');
+        const filename = `gundusoodhi_users_${new Date().toISOString().split('T')[0]}.csv`;
+
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+        res.send('\uFEFF' + csv);
+    } catch (error) {
+        console.error('Export users error:', error);
+        res.status(500).json({ success: false, message: 'Failed to export users' });
+    }
+};
+
 module.exports = {
     getDashboardStats,
     getAllUsers,
@@ -565,5 +619,6 @@ module.exports = {
     getDetailedAnalytics,
     getUserActivity,
     getContentAnalytics,
-    getActivityLogs
+    getActivityLogs,
+    exportUsers
 };

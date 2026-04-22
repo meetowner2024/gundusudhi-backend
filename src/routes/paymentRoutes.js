@@ -20,7 +20,8 @@ const {
     getPaymentStats,
     getOfflineOrders,
     updateOfflineOrder,
-    getMyOfflineOrders
+    getMyOfflineOrders,
+    exportPayments
 } = require('../controllers/paymentController');
 
 // Public/User Routes
@@ -36,6 +37,7 @@ router.post('/webhook', express.raw({ type: 'application/json' }), razorpayWebho
 // Admin Routes
 router.get('/history', authenticate, authorize('ADMIN', 'EDITOR'), getPaymentsHistory);
 router.get('/stats', authenticate, authorize('ADMIN', 'EDITOR'), getPaymentStats);
+router.get('/export', authenticate, authorize('ADMIN', 'EDITOR'), exportPayments);
 router.get('/offline-orders', authenticate, authorize('ADMIN', 'EDITOR'), getOfflineOrders);
 router.put('/offline-orders/:id', authenticate, authorize('ADMIN', 'EDITOR'), updateOfflineOrder);
 router.get('/subscribers', authenticate, authorize('ADMIN', 'EDITOR'), getSubscribers);
