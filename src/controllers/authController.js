@@ -3,6 +3,7 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const { query, transaction } = require('../config/database');
 const { validatePasscode } = require('./passcodeController');
+const { activityLogger } = require('../utils/logger');
 
 const generateToken = (userId, version, expiresIn = process.env.JWT_EXPIRES_IN || '7d') => {
     return jwt.sign(
@@ -57,6 +58,8 @@ const register = async (req, res) => {
         });
 
         const token = generateToken(result, 1);
+
+        activityLogger.info(`New user registered: ${name} (${email}) - ID: ${result}`);
 
         res.status(201).json({
             success: true,

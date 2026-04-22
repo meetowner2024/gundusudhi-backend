@@ -116,6 +116,8 @@ const createOrder = async (req, res) => {
             );
         }
 
+        paymentsLogger.info(`Payment intent created: User ${userId} initiated purchase for Plan ${plan.id} (${plan.price} INR). OrderID: ${order.id}. Offline: ${isOffline}`);
+
         res.json({
             success: true,
             data: {
@@ -180,6 +182,7 @@ const verifyPayment = async (req, res) => {
 
         if (!isSignatureValid) {
             await query('UPDATE payments SET status = "FAILED" WHERE razorpay_order_id = ?', [razorpay_order_id]);
+            paymentsLogger.error(`Payment failed or aborted: Invalid signature for OrderID: ${razorpay_order_id}`);
             return res.status(400).json({ success: false, message: 'Invalid payment signature' });
         }
 
