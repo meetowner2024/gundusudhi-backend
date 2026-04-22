@@ -251,6 +251,10 @@ const razorpayWebhook = async (req, res) => {
                     [paymentId, orderId]
                 );
 
+                try {
+                    await query(`UPDATE offline_orders SET status = 'SUCCESS', razorpay_payment_id = ? WHERE razorpay_order_id = ?`, [paymentId, orderId]);
+                } catch(e) {}
+
                 const payments = await query('SELECT user_id, plan_id FROM payments WHERE razorpay_order_id = ?', [orderId]);
                 if (payments.length > 0) {
                     await activateSubscription(payments[0].user_id, payments[0].plan_id, orderId);

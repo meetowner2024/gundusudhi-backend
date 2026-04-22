@@ -1,8 +1,12 @@
 const winston = require('winston');
 const path = require('path');
 
+const timezoned = () => {
+    return new Date().toLocaleString('sv-SE', { timeZone: 'Asia/Kolkata' });
+};
+
 const logFormat = winston.format.combine(
-    winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
+    winston.format.timestamp({ format: timezoned }),
     winston.format.printf(info => `[${info.timestamp}] ${info.level.toUpperCase()}: ${info.message}`)
 );
 
