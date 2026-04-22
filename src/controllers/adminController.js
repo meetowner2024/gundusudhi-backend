@@ -132,7 +132,13 @@ const updateUser = async (req, res) => {
         }
         if (subscription_end_date !== undefined) {
             updates.push('subscription_end_date = ?');
-            values.push(subscription_end_date ? new Date(subscription_end_date) : null);
+            if (subscription_end_date) {
+                // Convert ISO string to MySQL format: YYYY-MM-DD HH:MM:SS
+                const mysqlDate = new Date(subscription_end_date).toISOString().slice(0, 19).replace('T', ' ');
+                values.push(mysqlDate);
+            } else {
+                values.push(null);
+            }
         }
         if (is_active !== undefined) {
             updates.push('is_active = ?');
