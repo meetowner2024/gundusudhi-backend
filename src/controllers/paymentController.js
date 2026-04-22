@@ -254,6 +254,7 @@ const razorpayWebhook = async (req, res) => {
                 }
             } else if (event === 'payment.failed') {
                 await query('UPDATE payments SET status = "FAILED" WHERE razorpay_order_id = ?', [payload.order_id]);
+                paymentsLogger.error(`Webhook Warning - Payment failed for OrderID: ${payload.order_id}`);
             }
 
             res.json({ status: 'ok' });
