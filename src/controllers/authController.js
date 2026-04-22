@@ -4,7 +4,7 @@ const crypto = require('crypto');
 const { query, transaction } = require('../config/database');
 const { validatePasscode } = require('./passcodeController');
 
-const generateToken = (userId, version, expiresIn = '1h') => {
+const generateToken = (userId, version, expiresIn = process.env.JWT_EXPIRES_IN || '7d') => {
     return jwt.sign(
         { userId, version },
         process.env.JWT_SECRET,
@@ -15,6 +15,9 @@ const generateToken = (userId, version, expiresIn = '1h') => {
 const generateRefreshToken = () => {
     return crypto.randomBytes(40).toString('hex');
 };
+
+// How many days a refresh token stays valid (sliding window on each use)
+const REFRESH_EXPIRES_DAYS = parseInt(process.env.REFRESH_TOKEN_EXPIRES_DAYS || '30', 10);
 
 const register = async (req, res) => {
     try {
@@ -37,9 +40,9 @@ const register = async (req, res) => {
 
         const result = await transaction(async (connection) => {
             const [userResult] = await connection.execute(
-                `INSERT INTO users (name, email, password_hash, mobile, role, token_version, last_active_at, refresh_token_hash) 
-                 VALUES (?, ?, ?, ?, 'FREE_USER', 1, NOW(), ?)`,
-                [name, email, passwordHash, mobile || null, refreshToken]
+                `INSERT INTO users (name, email, password_hash, mobile, role, token_version, last_active_at, refresh_token_hash, refresh_token_expires_at) 
+                 VALUES (?, ?, ?, ?, 'FREE_USER', 1, NOW(), ?, DATE_ADD(NOW(), INTERVAL ? DAY))`,
+                [name, email, passwordHash, mobile || null, refreshToken, REFRESH_EXPIRES_DAYS]
             );
             const userId = userResult.insertId;
 
@@ -96,8 +99,9 @@ const login = async (req, res) => {
         const refreshToken = generateRefreshToken();
         
         await query(
-            `UPDATE users SET token_version = ?, last_active_at = NOW(), refresh_token_hash = ? WHERE id = ?`,
-            [newVersion, refreshToken, user.id]
+            `UPDATE users SET token_version = ?, last_active_at = NOW(), refresh_token_hash = ?,
+             refresh_token_expires_at = DATE_ADD(NOW(), INTERVAL ? DAY) WHERE id = ?`,
+            [newVersion, refreshToken, REFRESH_EXPIRES_DAYS, user.id]
         );
 
         const token = generateToken(user.id, newVersion);
@@ -129,22 +133,40 @@ const refreshToken = async (req, res) => {
         if (!refreshToken) return res.status(400).json({ success: false, message: 'Refresh Token required' });
 
         const users = await query(
-            `SELECT id, token_version, last_active_at FROM users WHERE refresh_token_hash = ?`,
+            `SELECT id, token_version, is_active, refresh_token_expires_at FROM users WHERE refresh_token_hash = ?`,
             [refreshToken]
         );
 
         if (users.length === 0) return res.status(403).json({ success: false, message: 'Invalid Refresh Token' });
 
         const user = users[0];
-        const lastActive = new Date(user.last_active_at).getTime();
-        const now = Date.now();
-        const oneHour = 60 * 60 * 1000;
 
-        if (now - lastActive > oneHour) {
-            return res.status(403).json({ success: false, message: 'Session expired due to inactivity. Please login again.' });
+        if (!user.is_active) {
+            return res.status(403).json({ success: false, message: 'Account is deactivated' });
         }
 
-        await query('UPDATE users SET last_active_at = NOW() WHERE id = ?', [user.id]);
+        // Check refresh token expiry (NULL means old row before migration — allow it)
+        if (user.refresh_token_expires_at) {
+            const expiresAt = new Date(user.refresh_token_expires_at).getTime();
+            if (Date.now() > expiresAt) {
+                // Expired — clear it so they must log in again
+                await query(
+                    'UPDATE users SET refresh_token_hash = NULL, refresh_token_expires_at = NULL WHERE id = ?',
+                    [user.id]
+                );
+                return res.status(403).json({
+                    success: false,
+                    message: 'Session expired. Please log in again.'
+                });
+            }
+        }
+
+        // Sliding window — extend expiry by REFRESH_EXPIRES_DAYS from now
+        await query(
+            `UPDATE users SET last_active_at = NOW(),
+             refresh_token_expires_at = DATE_ADD(NOW(), INTERVAL ? DAY) WHERE id = ?`,
+            [REFRESH_EXPIRES_DAYS, user.id]
+        );
         
         const newToken = generateToken(user.id, user.token_version);
 
@@ -164,7 +186,8 @@ const logout = async (req, res) => {
     try {
         if(req.user) {
             await query(
-                `UPDATE users SET refresh_token_hash = NULL, token_version = token_version + 1 WHERE id = ?`,
+                `UPDATE users SET refresh_token_hash = NULL, refresh_token_expires_at = NULL,
+                 token_version = token_version + 1 WHERE id = ?`,
                 [req.user.id]
             );
         }
@@ -310,8 +333,9 @@ const adminLogin = async (req, res) => {
         const refreshToken = generateRefreshToken();
         
         await query(
-            `UPDATE users SET token_version = ?, last_active_at = NOW(), refresh_token_hash = ? WHERE id = ?`,
-            [newVersion, refreshToken, user.id]
+            `UPDATE users SET token_version = ?, last_active_at = NOW(), refresh_token_hash = ?,
+             refresh_token_expires_at = DATE_ADD(NOW(), INTERVAL ? DAY) WHERE id = ?`,
+            [newVersion, refreshToken, REFRESH_EXPIRES_DAYS, user.id]
         );
 
         const token = generateToken(user.id, newVersion);
