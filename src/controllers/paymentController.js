@@ -615,7 +615,7 @@ const adminUpdateSubscription = async (req, res) => {
         }
         if (subscription_end_date !== undefined) {
             setClauses.push('subscription_end_date = ?');
-            params.push(subscription_end_date);
+            params.push(subscription_end_date ? new Date(subscription_end_date) : null);
         }
         if (is_active !== undefined) {
             setClauses.push('is_active = ?');

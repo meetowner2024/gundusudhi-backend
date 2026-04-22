@@ -128,11 +128,11 @@ const updateUser = async (req, res) => {
         }
         if (subscription_type !== undefined) {
             updates.push('subscription_type = ?');
-            values.push(subscription_type);
+            values.push(subscription_type === 'MAGAZINE' ? 'OFFLINE' : subscription_type);
         }
         if (subscription_end_date !== undefined) {
             updates.push('subscription_end_date = ?');
-            values.push(subscription_end_date);
+            values.push(subscription_end_date ? new Date(subscription_end_date) : null);
         }
         if (is_active !== undefined) {
             updates.push('is_active = ?');
