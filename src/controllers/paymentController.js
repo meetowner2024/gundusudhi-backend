@@ -148,6 +148,9 @@ const activateSubscription = async (userId, planId, razorpayOrderId) => {
 
     const endDate = new Date(startDate);
     endDate.setMonth(endDate.getMonth() + plan.duration_months);
+    
+    // Map 'MAGAZINE' plan type to 'OFFLINE' to match database enum
+    const userSubscriptionType = plan.type === 'MAGAZINE' ? 'OFFLINE' : plan.type;
 
     // Update user subscription
     await query(
@@ -156,14 +159,14 @@ const activateSubscription = async (userId, planId, razorpayOrderId) => {
              subscription_start_date = IFNULL(subscription_start_date, NOW()), 
              subscription_end_date = ? 
          WHERE id = ?`,
-        [plan.type, endDate, userId]
+        [userSubscriptionType, endDate, userId]
     );
 
     // Create magazine_subscriptions record
     await query(
         `INSERT INTO magazine_subscriptions (user_id, subscription_type, price_paid, duration_months, start_date, end_date, is_active, payment_id)
          VALUES (?, ?, ?, ?, NOW(), ?, 1, ?)`,
-        [userId, plan.type, plan.price, plan.duration_months, endDate, razorpayOrderId]
+        [userId, userSubscriptionType, plan.price, plan.duration_months, endDate, razorpayOrderId]
     );
 };
 
@@ -608,7 +611,7 @@ const adminUpdateSubscription = async (req, res) => {
 
         if (subscription_type !== undefined) {
             setClauses.push('subscription_type = ?');
-            params.push(subscription_type);
+            params.push(subscription_type === 'MAGAZINE' ? 'OFFLINE' : subscription_type);
         }
         if (subscription_end_date !== undefined) {
             setClauses.push('subscription_end_date = ?');
