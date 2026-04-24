@@ -1,4 +1,5 @@
 const { query } = require('../config/database');
+const bcrypt = require('bcryptjs');
 const getDashboardStats = async (req, res) => {
     try {
         const [totalArticles] = await query(
@@ -119,9 +120,16 @@ const getAllUsers = async (req, res) => {
 const updateUser = async (req, res) => {
     try {
         const { id } = req.params;
-        const { role, subscription_type, is_active, subscription_end_date } = req.body;
+        const { role, subscription_type, is_active, subscription_end_date, password } = req.body;
         const updates = [];
         const values = [];
+
+        if (password) {
+            const passwordHash = await bcrypt.hash(password, 10);
+            updates.push('password_hash = ?');
+            values.push(passwordHash);
+            updates.push('token_version = token_version + 1');
+        }
         if (role !== undefined) {
             updates.push('role = ?');
             values.push(role);

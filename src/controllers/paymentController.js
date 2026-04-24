@@ -495,7 +495,7 @@ const getOfflineOrders = async (req, res) => {
         if (date_to)   { whereClause += ' AND DATE(o.created_at) <= ?'; queryParams.push(date_to); }
 
         const orders = await query(
-            `SELECT o.*, sp.name as plan_name, sp.type as plan_type, u.name as user_name
+            `SELECT o.*, sp.name as plan_name, sp.type as plan_type, u.name as user_name, u.mobile as registered_mobile
              FROM offline_orders o
              LEFT JOIN subscription_plans sp ON o.plan_id = sp.id
              LEFT JOIN users u ON o.user_id = u.id
