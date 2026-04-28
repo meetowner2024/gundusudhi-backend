@@ -296,11 +296,13 @@ const getPaymentsHistory = async (req, res) => {
         }
 
         const payments = await query(
-            `SELECT p.*, u.name as user_name, u.email as user_email, sp.name as plan_name, sp.type as plan_type,
-                    u.subscription_type, u.subscription_end_date
+            `SELECT p.*, u.name as user_name, u.email as user_email, u.mobile as user_mobile, sp.name as plan_name, sp.type as plan_type,
+                    u.subscription_type, u.subscription_end_date,
+                    ua.address, ua.district, ua.state, ua.pincode
              FROM payments p
              JOIN users u ON p.user_id = u.id
              JOIN subscription_plans sp ON p.plan_id = sp.id
+             LEFT JOIN user_addresses ua ON u.id = ua.user_id AND ua.is_primary = TRUE
              ${whereClause}
              ORDER BY p.created_at DESC
              LIMIT ? OFFSET ?`,
@@ -420,10 +422,12 @@ const getSubscribers = async (req, res) => {
         const subscribers = await query(
             `SELECT u.id, u.name, u.email, u.mobile, u.role, u.subscription_type, 
                     u.subscription_start_date, u.subscription_end_date, u.is_active, u.created_at,
+                    ua.address, ua.district, ua.state, ua.pincode,
                     DATEDIFF(u.subscription_end_date, NOW()) as days_remaining,
                     (SELECT COUNT(*) FROM payments p WHERE p.user_id = u.id AND p.status = 'SUCCESS') as total_payments,
                     (SELECT SUM(p.amount) FROM payments p WHERE p.user_id = u.id AND p.status = 'SUCCESS') as total_spent
              FROM users u
+             LEFT JOIN user_addresses ua ON u.id = ua.user_id AND ua.is_primary = TRUE
              ${whereClause}
              ORDER BY u.subscription_end_date DESC
              LIMIT ? OFFSET ?`,

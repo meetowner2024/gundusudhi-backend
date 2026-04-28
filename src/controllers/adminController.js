@@ -75,24 +75,26 @@ const getAllUsers = async (req, res) => {
         const conditions = [];
         const values = [];
         if (role) {
-            conditions.push('role = ?');
+            conditions.push('u.role = ?');
             values.push(role);
         }
         if (search) {
-            conditions.push('(name LIKE ? OR email LIKE ?)');
-            values.push(`%${search}%`, `%${search}%`);
+            conditions.push('(u.name LIKE ? OR u.email LIKE ? OR u.mobile LIKE ?)');
+            values.push(`%${search}%`, `%${search}%`, `%${search}%`);
         }
         const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-        const countSql = `SELECT COUNT(*) as total FROM users ${whereClause}`;
+        const countSql = `SELECT COUNT(*) as total FROM users u ${whereClause}`;
         const countResult = await query(countSql, values);
         const total = countResult[0]?.total || 0;
         const userValues = [...values, limit, offset];
         const usersQuery = `
-            SELECT id, name, email, mobile, role, subscription_type,
-                   subscription_start_date, subscription_end_date, is_active, created_at
-            FROM users
+            SELECT u.id, u.name, u.email, u.mobile, u.role, u.subscription_type,
+                   u.subscription_start_date, u.subscription_end_date, u.is_active, u.created_at,
+                   ua.address, ua.district, ua.state, ua.pincode
+            FROM users u
+            LEFT JOIN user_addresses ua ON u.id = ua.user_id AND ua.is_primary = TRUE
             ${whereClause}
-            ORDER BY created_at DESC
+            ORDER BY u.created_at DESC
             LIMIT ? OFFSET ?
         `;
         const users = await query(usersQuery, userValues);
